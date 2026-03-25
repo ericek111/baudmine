@@ -539,8 +539,8 @@ void Application::renderControlPanel() {
     if (ImGui::CollapsingHeader("FFT", ImGuiTreeNodeFlags_DefaultOpen)) {
         const char* sizeNames[] = {"256", "512", "1024", "2048", "4096",
                                    "8192", "16384", "32768", "65536"};
-        float halfW = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
-        ImGui::SetNextItemWidth(halfW);
+        float availSpace = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x);
+        ImGui::SetNextItemWidth(availSpace * 0.35f);
         if (ImGui::Combo("##fftsize", &fftSizeIdx_, sizeNames, kNumFFTSizes)) {
             settings_.fftSize = kFFTSizes[fftSizeIdx_];
             updateAnalyzerSettings();
@@ -551,7 +551,7 @@ void Application::renderControlPanel() {
         ImGui::SameLine();
         const char* winNames[] = {"Rectangular", "Hann", "Hamming", "Blackman",
                                   "Blackman-Harris", "Kaiser", "Flat Top"};
-        ImGui::SetNextItemWidth(halfW);
+        ImGui::SetNextItemWidth(availSpace * 0.65f);
         if (ImGui::Combo("##window", &windowIdx_, winNames,
                          static_cast<int>(WindowType::Count))) {
             settings_.window = static_cast<WindowType>(windowIdx_);
@@ -763,7 +763,9 @@ void Application::renderControlPanel() {
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Clear cursors A and B");
 
         if (cursorsOpen) {
+            bool prevSnap = cursors_.snapToPeaks;
             cursors_.drawPanel();
+            if (cursors_.snapToPeaks != prevSnap) saveConfig();
         }
     }
 
@@ -1420,6 +1422,7 @@ void Application::loadConfig() {
     showSidebar_  = config_.getBool("show_sidebar", showSidebar_);
     specDisplay_.peakHoldEnable = config_.getBool("peak_hold", specDisplay_.peakHoldEnable);
     specDisplay_.peakHoldDecay  = config_.getFloat("peak_hold_decay", specDisplay_.peakHoldDecay);
+    cursors_.snapToPeaks        = config_.getBool("snap_to_peaks", cursors_.snapToPeaks);
 
     // Clamp
     fftSizeIdx_   = std::clamp(fftSizeIdx_, 0, kNumFFTSizes - 1);
@@ -1460,6 +1463,7 @@ void Application::saveConfig() const {
     cfg.setBool("show_sidebar", showSidebar_);
     cfg.setBool("peak_hold", specDisplay_.peakHoldEnable);
     cfg.setFloat("peak_hold_decay", specDisplay_.peakHoldDecay);
+    cfg.setBool("snap_to_peaks", cursors_.snapToPeaks);
 
     if (paDeviceIdx_ >= 0 && paDeviceIdx_ < static_cast<int>(paDevices_.size()))
         cfg.setString("device_name", paDevices_[paDeviceIdx_].name);
