@@ -253,6 +253,20 @@ void Application::render() {
         if (ImGui::BeginMenu("View")) {
             ImGui::MenuItem("Grid", nullptr, &specDisplay_.showGrid);
             ImGui::MenuItem("Fill Spectrum", nullptr, &specDisplay_.fillSpectrum);
+            ImGui::Separator();
+            if (ImGui::MenuItem("VSync", nullptr, &vsync_)) {
+                SDL_GL_SetSwapInterval(vsync_ ? 1 : 0);
+            }
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Debug")) {
+            ImGui::MenuItem("Metrics/Debugger", nullptr, &showMetricsWindow_);
+            ImGui::MenuItem("Debug Log", nullptr, &showDebugLog_);
+            ImGui::MenuItem("Stack Tool", nullptr, &showStackTool_);
+            ImGui::MenuItem("Demo Window", nullptr, &showDemoWindow_);
+            ImGui::Separator();
+            ImGui::Text("%.1f FPS (%.3f ms)", ImGui::GetIO().Framerate,
+                        1000.0f / ImGui::GetIO().Framerate);
             ImGui::EndMenu();
         }
         ImGui::EndMenuBar();
@@ -336,6 +350,12 @@ void Application::render() {
     ImGui::EndChild();
 
     ImGui::End();
+
+    // ImGui debug windows
+    if (showDemoWindow_)    ImGui::ShowDemoWindow(&showDemoWindow_);
+    if (showMetricsWindow_) ImGui::ShowMetricsWindow(&showMetricsWindow_);
+    if (showDebugLog_)      ImGui::ShowDebugLogWindow(&showDebugLog_);
+    if (showStackTool_)     ImGui::ShowIDStackToolWindow(&showStackTool_);
 
     // Render
     ImGui::Render();

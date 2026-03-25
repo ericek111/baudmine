@@ -113,6 +113,7 @@ private:
     float     maxDB_       = 0.0f;
     FreqScale freqScale_   = FreqScale::Linear;
     bool      paused_      = false;
+    bool      vsync_       = true;
     // (waterfallW_ removed — texture width tracks bin count automatically)
     // (waterfallH_ removed — fixed history depth of 1024 rows)
 
@@ -170,6 +171,12 @@ private:
     // Panel geometry (stored for cursor interaction)
     float specPosX_ = 0, specPosY_ = 0, specSizeX_ = 0, specSizeY_ = 0;
     float wfPosX_ = 0, wfPosY_ = 0, wfSizeX_ = 0, wfSizeY_ = 0;
+
+    // ImGui debug windows
+    bool showDemoWindow_    = false;
+    bool showMetricsWindow_ = false;
+    bool showDebugLog_      = false;
+    bool showStackTool_     = false;
 
     // Pre-allocated scratch buffers (avoid per-frame heap allocations)
     std::vector<std::vector<float>>  wfSpectraScratch_;
