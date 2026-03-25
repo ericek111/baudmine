@@ -7,7 +7,21 @@
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
+#include <emscripten/html5.h>
 #include <GLES2/gl2.h>
+
+EM_JS(void, js_toggleFullscreen, (), {
+    if (document.fullscreenElement) {
+        document.exitFullscreen();
+    } else {
+        document.documentElement.requestFullscreen();
+    }
+});
+
+EM_JS(int, js_isFullscreen, (), {
+    return document.fullscreenElement ? 1 : 0;
+});
+
 #else
 #include <GL/gl.h>
 #endif
@@ -368,6 +382,12 @@ void Application::render() {
                         1000.0f / ImGui::GetIO().Framerate);
             ImGui::EndMenu();
         }
+
+#ifdef __EMSCRIPTEN__
+        if (ImGui::SmallButton(js_isFullscreen() ? "Exit Fullscreen" : "Fullscreen")) {
+            js_toggleFullscreen();
+        }
+#endif
 
         // Right-aligned status in menu bar
         {
