@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Types.h"
+#include "core/Config.h"
 #include "dsp/SpectrumAnalyzer.h"
 #include "audio/AudioSource.h"
 #include "audio/PortAudioSource.h"
@@ -89,6 +90,9 @@ private:
     void computeMathChannels();
     void renderMathPanel();
 
+    void loadConfig();
+    void saveConfig() const;
+
     // SDL / GL / ImGui
     SDL_Window*   window_    = nullptr;
     SDL_GLContext  glContext_ = nullptr;
@@ -162,7 +166,7 @@ private:
 
     // Frequency zoom/pan (normalized 0–1 over full bandwidth)
     float viewLo_ = 0.0f;   // left edge
-    float viewHi_ = 1.0f;   // right edge
+    float viewHi_ = 0.5f;   // right edge (default 2x zoom from left)
 
     // Spectrum/waterfall split ratio (fraction of content height for spectrum)
     float spectrumFrac_ = 0.35f;
@@ -171,6 +175,12 @@ private:
     // Panel geometry (stored for cursor interaction)
     float specPosX_ = 0, specPosY_ = 0, specSizeX_ = 0, specSizeY_ = 0;
     float wfPosX_ = 0, wfPosY_ = 0, wfSizeX_ = 0, wfSizeY_ = 0;
+
+    // Config persistence
+    Config config_;
+
+    // UI visibility
+    bool showSidebar_       = true;
 
     // ImGui debug windows
     bool showDemoWindow_    = false;

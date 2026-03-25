@@ -21,6 +21,7 @@ void WaterfallDisplay::init(int binCount, int height) {
     if (texture_) glDeleteTextures(1, &texture_);
     glGenTextures(1, &texture_);
     glBindTexture(GL_TEXTURE_2D, texture_);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);  // RGB rows may not be 4-byte aligned
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -32,6 +33,42 @@ void WaterfallDisplay::init(int binCount, int height) {
 
 void WaterfallDisplay::resize(int binCount, int height) {
     if (binCount == width_ && height == height_) return;
+
+    // If width unchanged and height is growing, preserve existing data.
+    if (binCount == width_ && height > height_ && height_ > 0 && texture_) {
+        int oldH = height_;
+        int oldRow = currentRow_;
+        std::vector<uint8_t> oldBuf = std::move(pixelBuf_);
+
+        width_  = binCount;
+        height_ = height;
+        pixelBuf_.assign(width_ * height_ * 3, 0);
+
+        // Copy old rows into the new buffer, preserving their circular order.
+        // Old rows occupy indices 0..oldH-1; new rows oldH..height-1 are black.
+        // The circular position stays the same since old indices are valid in
+        // the larger buffer.
+        int rowBytes = width_ * 3;
+        for (int r = 0; r < oldH; ++r)
+            std::memcpy(pixelBuf_.data() + r * rowBytes,
+                        oldBuf.data() + r * rowBytes, rowBytes);
+
+        currentRow_ = oldRow;
+
+        // Recreate texture at new size and upload all data.
+        if (texture_) glDeleteTextures(1, &texture_);
+        glGenTextures(1, &texture_);
+        glBindTexture(GL_TEXTURE_2D, texture_);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width_, height_, 0,
+                     GL_RGB, GL_UNSIGNED_BYTE, pixelBuf_.data());
+        return;
+    }
+
     init(binCount, height);
 }
 
@@ -116,6 +153,7 @@ void WaterfallDisplay::pushLineMulti(
 
 void WaterfallDisplay::uploadRow(int row) {
     glBindTexture(GL_TEXTURE_2D, texture_);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, row, width_, 1,
                     GL_RGB, GL_UNSIGNED_BYTE,
                     pixelBuf_.data() + row * width_ * 3);

@@ -51,6 +51,7 @@ target_link_libraries(imgui PUBLIC PkgConfig::SDL2 OpenGL::GL)
 
 set(SOURCES
     src/main.cpp
+    src/core/Config.cpp
     src/dsp/WindowFunctions.cpp
     src/dsp/FFTProcessor.cpp
     src/dsp/SpectrumAnalyzer.cpp

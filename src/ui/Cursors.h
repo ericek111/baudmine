@@ -2,6 +2,7 @@
 
 #include "core/Types.h"
 #include "ui/SpectrumDisplay.h"
+#include <deque>
 #include <vector>
 
 namespace baudline {
@@ -27,7 +28,7 @@ public:
               float viewLo = 0.0f, float viewHi = 1.0f) const;
 
     // Draw cursor readout panel (ImGui widgets).
-    void drawPanel() const;
+    void drawPanel();
 
     // Set cursor A/B positions from mouse click.
     void setCursorA(double freq, float dB, int bin);
@@ -47,6 +48,23 @@ public:
 
     // Hover cursor (follows mouse, always active)
     CursorInfo hover;
+
+    // Averaging: displayed dB is the mean of the last N samples.
+    int avgCount = 1;  // 1 = no averaging
+
+    // Averaged dB values (used for display and delta).
+    float avgDBA() const;
+    float avgDBB() const;
+
+private:
+    // Averaging state per cursor.
+    struct AvgState {
+        std::deque<float> samples;
+        double sum = 0.0;
+        int    lastBin = -1;  // reset when cursor moves
+    };
+    mutable AvgState avgA_, avgB_;
+    void pushAvg(AvgState& st, float dB, int bin) const;
 };
 
 } // namespace baudline

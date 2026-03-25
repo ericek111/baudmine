@@ -80,7 +80,10 @@ bool Application::init(int argc, char** argv) {
     // Enumerate audio devices
     paDevices_ = PortAudioSource::listInputDevices();
 
-    // Default settings
+    // Load saved config (overwrites defaults for FFT size, overlap, window, etc.)
+    loadConfig();
+
+    // Apply loaded settings
     settings_.fftSize    = kFFTSizes[fftSizeIdx_];
     settings_.overlap    = overlapPct_ / 100.0f;
     settings_.window     = static_cast<WindowType>(windowIdx_);
@@ -243,22 +246,94 @@ void Application::render() {
 
     // Menu bar
     if (ImGui::BeginMenuBar()) {
+        // Sidebar toggle (leftmost)
+        if (ImGui::Button(showSidebar_ ? "  <<  " : "  >>  ")) {
+            showSidebar_ = !showSidebar_;
+            saveConfig();
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip(showSidebar_ ? "Hide sidebar" : "Show sidebar");
+
+        ImGui::Separator();
+
         if (ImGui::BeginMenu("File")) {
-            if (ImGui::MenuItem("Open WAV...")) {
-                // TODO: file dialog integration
+            // ── File input ──
+            static char filePathBuf[512] = "";
+            if (filePath_.size() < sizeof(filePathBuf))
+                std::strncpy(filePathBuf, filePath_.c_str(), sizeof(filePathBuf) - 1);
+            ImGui::SetNextItemWidth(200);
+            if (ImGui::InputText("Path", filePathBuf, sizeof(filePathBuf)))
+                filePath_ = filePathBuf;
+
+            const char* formatNames[] = {"Float32 I/Q", "Int16 I/Q", "Uint8 I/Q", "WAV"};
+            ImGui::SetNextItemWidth(140);
+            ImGui::Combo("Format", &fileFormatIdx_, formatNames, 4);
+
+            ImGui::SetNextItemWidth(140);
+            ImGui::DragFloat("Sample Rate", &fileSampleRate_, 1000.0f, 1000.0f, 100e6f, "%.0f Hz");
+            ImGui::Checkbox("Loop", &fileLoop_);
+
+            if (ImGui::MenuItem("Open File")) {
+                InputFormat fmt;
+                switch (fileFormatIdx_) {
+                    case 0: fmt = InputFormat::Float32IQ; break;
+                    case 1: fmt = InputFormat::Int16IQ;   break;
+                    case 2: fmt = InputFormat::Uint8IQ;   break;
+                    default: fmt = InputFormat::WAV;       break;
+                }
+                openFile(filePath_, fmt, fileSampleRate_);
+                updateAnalyzerSettings();
             }
+
+            ImGui::Separator();
+
+            // ── Audio device ──
+            if (!paDevices_.empty()) {
+                ImGui::Text("Audio Device");
+                std::vector<const char*> devNames;
+                for (auto& d : paDevices_) devNames.push_back(d.name.c_str());
+                ImGui::SetNextItemWidth(250);
+                if (ImGui::Combo("##device", &paDeviceIdx_, devNames.data(),
+                                 static_cast<int>(devNames.size()))) {
+                    openPortAudio();
+                    updateAnalyzerSettings();
+                    saveConfig();
+                }
+            }
+            if (ImGui::MenuItem("Open PortAudio")) {
+                openPortAudio();
+                updateAnalyzerSettings();
+            }
+
+            ImGui::Separator();
             if (ImGui::MenuItem("Quit", "Esc")) running_ = false;
             ImGui::EndMenu();
         }
+
         if (ImGui::BeginMenu("View")) {
             ImGui::MenuItem("Grid", nullptr, &specDisplay_.showGrid);
             ImGui::MenuItem("Fill Spectrum", nullptr, &specDisplay_.fillSpectrum);
+
+            ImGui::Separator();
+
+            // Frequency scale
+            int fs = static_cast<int>(freqScale_);
+            const char* fsNames[] = {"Linear", "Logarithmic"};
+            ImGui::SetNextItemWidth(120);
+            if (ImGui::Combo("Freq Scale", &fs, fsNames, 2)) {
+                freqScale_ = static_cast<FreqScale>(fs);
+                saveConfig();
+            }
+
             ImGui::Separator();
             if (ImGui::MenuItem("VSync", nullptr, &vsync_)) {
                 SDL_GL_SetSwapInterval(vsync_ ? 1 : 0);
+                saveConfig();
             }
+
             ImGui::EndMenu();
         }
+
         if (ImGui::BeginMenu("Debug")) {
             ImGui::MenuItem("Metrics/Debugger", nullptr, &showMetricsWindow_);
             ImGui::MenuItem("Debug Log", nullptr, &showDebugLog_);
@@ -269,20 +344,36 @@ void Application::render() {
                         1000.0f / ImGui::GetIO().Framerate);
             ImGui::EndMenu();
         }
+
+        // Right-aligned status in menu bar
+        {
+            float barW = ImGui::GetWindowWidth();
+            char statusBuf[128];
+            std::snprintf(statusBuf, sizeof(statusBuf), "%.0f Hz | %d pt | %.1f Hz/bin | %.0f FPS",
+                          settings_.sampleRate, settings_.fftSize,
+                          settings_.sampleRate / settings_.fftSize,
+                          ImGui::GetIO().Framerate);
+            ImVec2 textSz = ImGui::CalcTextSize(statusBuf);
+            ImGui::SameLine(barW - textSz.x - 16);
+            ImGui::TextDisabled("%s", statusBuf);
+        }
+
         ImGui::EndMenuBar();
     }
 
-    // Layout: controls on left (250px), spectrum+waterfall on right
-    float controlW = 260.0f;
-    float contentW = ImGui::GetContentRegionAvail().x - controlW - 8;
+    // Layout
+    float totalW = ImGui::GetContentRegionAvail().x;
     float contentH = ImGui::GetContentRegionAvail().y;
+    float controlW = showSidebar_ ? 270.0f : 0.0f;
+    float contentW = totalW - (showSidebar_ ? controlW + 8 : 0);
 
-    // Control panel
-    ImGui::BeginChild("Controls", {controlW, contentH}, true);
-    renderControlPanel();
-    ImGui::EndChild();
-
-    ImGui::SameLine();
+    // Control panel (sidebar)
+    if (showSidebar_) {
+        ImGui::BeginChild("Controls", {controlW, contentH}, true);
+        renderControlPanel();
+        ImGui::EndChild();
+        ImGui::SameLine();
+    }
 
     // Spectrum + Waterfall with draggable splitter
     ImGui::BeginChild("Display", {contentW, contentH}, false);
@@ -306,6 +397,10 @@ void Application::render() {
             float dy = ImGui::GetIO().MouseDelta.y;
             spectrumFrac_ += dy / contentH;
             spectrumFrac_ = std::clamp(spectrumFrac_, 0.1f, 0.9f);
+            draggingSplit_ = true;
+        } else if (draggingSplit_) {
+            draggingSplit_ = false;
+            saveConfig();
         }
 
         // Draw splitter line
@@ -369,239 +464,197 @@ void Application::render() {
 }
 
 void Application::renderControlPanel() {
-    ImGui::TextColored({0.4f, 0.8f, 1.0f, 1.0f}, "BAUDLINE");
-    ImGui::Separator();
-
-    // Input source
-    ImGui::Text("Input Source");
-    if (ImGui::Button("PortAudio (Mic)")) {
-        openPortAudio();
-        updateAnalyzerSettings();
-    }
-
-    ImGui::Separator();
-    ImGui::Text("File Input");
-
-    // Show file path input
-    static char filePathBuf[512] = "";
-    if (filePath_.size() < sizeof(filePathBuf))
-        std::strncpy(filePathBuf, filePath_.c_str(), sizeof(filePathBuf) - 1);
-    if (ImGui::InputText("Path", filePathBuf, sizeof(filePathBuf)))
-        filePath_ = filePathBuf;
-
-    const char* formatNames[] = {"Float32 I/Q", "Int16 I/Q", "Uint8 I/Q", "WAV"};
-    ImGui::Combo("Format", &fileFormatIdx_, formatNames, 4);
-    ImGui::DragFloat("Sample Rate", &fileSampleRate_, 1000.0f, 1000.0f, 100e6f, "%.0f Hz");
-    ImGui::Checkbox("Loop", &fileLoop_);
-
-    if (ImGui::Button("Open File")) {
-        InputFormat fmt;
-        switch (fileFormatIdx_) {
-            case 0: fmt = InputFormat::Float32IQ; break;
-            case 1: fmt = InputFormat::Int16IQ;   break;
-            case 2: fmt = InputFormat::Uint8IQ;   break;
-            default: fmt = InputFormat::WAV;       break;
-        }
-        openFile(filePath_, fmt, fileSampleRate_);
-        updateAnalyzerSettings();
-    }
-
-    // PortAudio device list
-    if (!paDevices_.empty()) {
-        ImGui::Separator();
-        ImGui::Text("Audio Device");
-        std::vector<const char*> devNames;
-        for (auto& d : paDevices_) devNames.push_back(d.name.c_str());
-        if (ImGui::Combo("Device", &paDeviceIdx_, devNames.data(),
-                         static_cast<int>(devNames.size()))) {
-            openPortAudio();
-            updateAnalyzerSettings();
-        }
-    }
-
-    ImGui::Separator();
-    ImGui::Text("FFT Settings");
-
-    // FFT size
-    {
-        const char* sizeNames[] = {"256", "512", "1024", "2048", "4096",
-                                   "8192", "16384", "32768", "65536"};
-        if (ImGui::Combo("FFT Size", &fftSizeIdx_, sizeNames, kNumFFTSizes)) {
-            settings_.fftSize = kFFTSizes[fftSizeIdx_];
-            updateAnalyzerSettings();
-        }
-    }
-
-    // Overlap — inverted x⁴ curve: sensitive at the high end (90%+).
-    {
-        int hopSamples = static_cast<int>(settings_.fftSize * (1.0f - settings_.overlap));
-        if (hopSamples < 1) hopSamples = 1;
-        int overlapSamples = settings_.fftSize - hopSamples;
-
-        float sliderVal = 1.0f - std::pow(1.0f - overlapPct_ / 99.0f, 0.25f);
-        if (ImGui::SliderFloat("Overlap", &sliderVal, 0.0f, 1.0f, "")) {
-            float inv = 1.0f - sliderVal;
-            float inv2 = inv * inv;
-            overlapPct_ = 99.0f * (1.0f - inv2 * inv2);
-            settings_.overlap = overlapPct_ / 100.0f;
-            updateAnalyzerSettings();
-        }
-
-        // Draw overlay text centered on the slider frame (not the label).
-        char overlayText[64];
-        std::snprintf(overlayText, sizeof(overlayText), "%.1f%% (%d samples)", overlapPct_, overlapSamples);
-        ImVec2 textSize = ImGui::CalcTextSize(overlayText);
-        // The slider frame width = total widget width minus label.
-        // ImGui::CalcItemWidth() gives the frame width.
-        ImVec2 sliderMin = ImGui::GetItemRectMin();
-        float frameW = ImGui::CalcItemWidth();
-        float frameH = ImGui::GetItemRectMax().y - sliderMin.y;
-        float tx = sliderMin.x + (frameW - textSize.x) * 0.5f;
-        float ty = sliderMin.y + (frameH - textSize.y) * 0.5f;
-        ImGui::GetForegroundDrawList()->AddText({tx, ty}, IM_COL32(255, 255, 255, 220), overlayText);
-    }
-
-    // Window function
-    {
-        const char* winNames[] = {"Rectangular", "Hann", "Hamming", "Blackman",
-                                  "Blackman-Harris", "Kaiser", "Flat Top"};
-        if (ImGui::Combo("Window", &windowIdx_, winNames,
-                         static_cast<int>(WindowType::Count))) {
-            settings_.window = static_cast<WindowType>(windowIdx_);
-            if (settings_.window == WindowType::Kaiser) {
-                // Show Kaiser beta slider
-            }
-            updateAnalyzerSettings();
-        }
-    }
-
-    if (settings_.window == WindowType::Kaiser) {
-        if (ImGui::SliderFloat("Kaiser Beta", &settings_.kaiserBeta, 0.0f, 20.0f)) {
-            updateAnalyzerSettings();
-        }
-    }
-
-    ImGui::Separator();
-    ImGui::Text("Display");
-
-    // Color map
-    {
-        const char* cmNames[] = {"Magma", "Viridis", "Inferno", "Plasma", "Grayscale"};
-        if (ImGui::Combo("Color Map", &colorMapIdx_, cmNames,
-                         static_cast<int>(ColorMapType::Count))) {
-            colorMap_.setType(static_cast<ColorMapType>(colorMapIdx_));
-            waterfall_.setColorMap(colorMap_);
-        }
-    }
-
-    // Frequency scale
-    {
-        int fs = static_cast<int>(freqScale_);
-        const char* fsNames[] = {"Linear", "Logarithmic"};
-        if (ImGui::Combo("Freq Scale", &fs, fsNames, 2))
-            freqScale_ = static_cast<FreqScale>(fs);
-    }
-
-    // Zoom info & reset
-    if (viewLo_ > 0.0f || viewHi_ < 1.0f) {
-        float zoomPct = 1.0f / (viewHi_ - viewLo_);
-        ImGui::Text("Zoom: %.1fx", zoomPct);
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Reset")) {
-            viewLo_ = 0.0f;
-            viewHi_ = 1.0f;
-        }
-    }
-    ImGui::TextDisabled("Scroll: freq zoom | MMB drag: pan");
-    ImGui::TextDisabled("Ctrl+Scroll: dB zoom | MMB dbl: reset");
-
-    // dB range
-    ImGui::DragFloatRange2("dB Range", &minDB_, &maxDB_, 1.0f, -200.0f, 20.0f,
-                           "Min: %.0f", "Max: %.0f");
-
-    // Peak hold
-    ImGui::Checkbox("Peak Hold", &specDisplay_.peakHoldEnable);
-    if (specDisplay_.peakHoldEnable) {
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(80);
-        ImGui::SliderFloat("Decay", &specDisplay_.peakHoldDecay, 0.0f, 120.0f, "%.0f dB/s");
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Clear##peakhold"))
-            specDisplay_.clearPeakHold();
-    }
-
-    // Channel colors (only shown for multi-channel)
-    int nCh = analyzer_.numSpectra();
-    if (nCh > 1) {
-        ImGui::Separator();
-        ImGui::Text("Channels (%d)", nCh);
-
-        static const char* defaultNames[] = {
-            "Left", "Right", "Ch 3", "Ch 4", "Ch 5", "Ch 6", "Ch 7", "Ch 8"
-        };
-        for (int ch = 0; ch < nCh && ch < kMaxChannels; ++ch) {
-            ImGui::PushID(ch);
-            ImGui::Checkbox("##en", &channelEnabled_[ch]);
-            ImGui::SameLine();
-            ImGui::ColorEdit3(defaultNames[ch], &channelColors_[ch].x,
-                              ImGuiColorEditFlags_NoInputs);
-            ImGui::PopID();
-        }
-
-        // Waterfall mode
-        ImGui::Checkbox("Multi-Ch Waterfall", &waterfallMultiCh_);
-        if (!waterfallMultiCh_) {
-            if (ImGui::SliderInt("Waterfall Ch", &waterfallChannel_, 0, nCh - 1))
-                waterfallChannel_ = std::clamp(waterfallChannel_, 0, nCh - 1);
-        }
-    }
-
-    // Math channels section (always shown).
-    ImGui::Separator();
-    renderMathPanel();
-
-    ImGui::Separator();
-
-    // Playback controls
-    if (ImGui::Button(paused_ ? "Resume [Space]" : "Pause [Space]"))
+    // ── Playback ──
+    float btnW = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 2) / 3.0f;
+    if (ImGui::Button(paused_ ? "Resume" : "Pause", {btnW, 0}))
         paused_ = !paused_;
-
     ImGui::SameLine();
-    if (ImGui::Button("Clear")) {
+    if (ImGui::Button("Clear", {btnW, 0}))
         analyzer_.clearHistory();
-    }
-
-    ImGui::Separator();
-
-    // Cursors
-    cursors_.drawPanel();
-
-    ImGui::Separator();
-    if (ImGui::Button("Snap to Peak [P]")) {
+    ImGui::SameLine();
+    if (ImGui::Button("Peak", {btnW, 0})) {
         int pkCh = std::clamp(waterfallChannel_, 0, analyzer_.numSpectra() - 1);
         cursors_.snapToPeak(analyzer_.channelSpectrum(pkCh),
                             settings_.sampleRate, settings_.isIQ,
                             settings_.fftSize);
     }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Snap cursor A to peak");
 
-    // Status
+    // ── FFT ──
+    ImGui::Spacing();
+    if (ImGui::CollapsingHeader("FFT", ImGuiTreeNodeFlags_DefaultOpen)) {
+        const char* sizeNames[] = {"256", "512", "1024", "2048", "4096",
+                                   "8192", "16384", "32768", "65536"};
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::Combo("##fftsize", &fftSizeIdx_, sizeNames, kNumFFTSizes)) {
+            settings_.fftSize = kFFTSizes[fftSizeIdx_];
+            updateAnalyzerSettings();
+            saveConfig();
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("FFT Size");
+
+        const char* winNames[] = {"Rectangular", "Hann", "Hamming", "Blackman",
+                                  "Blackman-Harris", "Kaiser", "Flat Top"};
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::Combo("##window", &windowIdx_, winNames,
+                         static_cast<int>(WindowType::Count))) {
+            settings_.window = static_cast<WindowType>(windowIdx_);
+            updateAnalyzerSettings();
+            saveConfig();
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Window Function");
+
+        if (settings_.window == WindowType::Kaiser) {
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::SliderFloat("##kaiser", &settings_.kaiserBeta, 0.0f, 20.0f, "Kaiser: %.1f"))
+                updateAnalyzerSettings();
+        }
+
+        // Overlap
+        {
+            int hopSamples = static_cast<int>(settings_.fftSize * (1.0f - settings_.overlap));
+            if (hopSamples < 1) hopSamples = 1;
+            int overlapSamples = settings_.fftSize - hopSamples;
+
+            ImGui::SetNextItemWidth(-1);
+            float sliderVal = 1.0f - std::pow(1.0f - overlapPct_ / 99.0f, 0.25f);
+            if (ImGui::SliderFloat("##overlap", &sliderVal, 0.0f, 1.0f, "")) {
+                float inv = 1.0f - sliderVal;
+                float inv2 = inv * inv;
+                overlapPct_ = 99.0f * (1.0f - inv2 * inv2);
+                settings_.overlap = overlapPct_ / 100.0f;
+                updateAnalyzerSettings();
+                saveConfig();
+            }
+
+            char overlayText[64];
+            std::snprintf(overlayText, sizeof(overlayText), "%.1f%% (%d samples)", overlapPct_, overlapSamples);
+            ImVec2 textSize = ImGui::CalcTextSize(overlayText);
+            ImVec2 rMin = ImGui::GetItemRectMin();
+            ImVec2 rMax = ImGui::GetItemRectMax();
+            float tx = rMin.x + ((rMax.x - rMin.x) - textSize.x) * 0.5f;
+            float ty = rMin.y + ((rMax.y - rMin.y) - textSize.y) * 0.5f;
+            ImGui::GetForegroundDrawList()->AddText({tx, ty}, IM_COL32(255, 255, 255, 220), overlayText);
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Overlap");
+        }
+    }
+
+    // ── Display ──
+    ImGui::Spacing();
+    if (ImGui::CollapsingHeader("Display", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::SetNextItemWidth(-1);
+        ImGui::DragFloatRange2("##dbrange", &minDB_, &maxDB_, 1.0f, -200.0f, 20.0f,
+                               "Min: %.0f dB", "Max: %.0f dB");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("dB Range (min / max)");
+
+        ImGui::Checkbox("Peak Hold", &specDisplay_.peakHoldEnable);
+        if (specDisplay_.peakHoldEnable) {
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x
+                                    - ImGui::CalcTextSize("Clear").x
+                                    - ImGui::GetStyle().ItemSpacing.x
+                                    - ImGui::GetStyle().FramePadding.x * 2);
+            ImGui::SliderFloat("##decay", &specDisplay_.peakHoldDecay, 0.0f, 120.0f, "%.0f dB/s");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Decay rate");
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Clear##peakhold"))
+                specDisplay_.clearPeakHold();
+        }
+
+        if (viewLo_ > 0.0f || viewHi_ < 1.0f) {
+            float zoomPct = 1.0f / (viewHi_ - viewLo_);
+            ImGui::Text("Zoom: %.1fx", zoomPct);
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Reset##zoom")) {
+                viewLo_ = 0.0f;
+                viewHi_ = 1.0f;
+            }
+        }
+    }
+
+    // ── Channels ──
+    ImGui::Spacing();
+    {
+        int nCh = analyzer_.numSpectra();
+        bool isMulti = waterfallMultiCh_ && nCh > 1;
+
+        // Header with inline Single/Multi toggle
+        bool headerOpen = ImGui::CollapsingHeader("##channels_hdr",
+                                                   ImGuiTreeNodeFlags_DefaultOpen |
+                                                   ImGuiTreeNodeFlags_AllowOverlap);
+        ImGui::SameLine();
+        ImGui::Text("Channels");
+        if (nCh > 1) {
+            ImGui::SameLine();
+            float btnW = 60.0f;
+            ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - btnW);
+            if (ImGui::Button(isMulti ? " Multi " : "Single ", {btnW, 0})) {
+                waterfallMultiCh_ = !waterfallMultiCh_;
+            }
+        }
+
+        if (headerOpen) {
+            if (isMulti) {
+                // Multi-channel: per-channel colors and enable
+                static const char* defaultNames[] = {
+                    "Left", "Right", "Ch 3", "Ch 4", "Ch 5", "Ch 6", "Ch 7", "Ch 8"
+                };
+                for (int ch = 0; ch < nCh && ch < kMaxChannels; ++ch) {
+                    ImGui::PushID(ch);
+                    ImGui::Checkbox("##en", &channelEnabled_[ch]);
+                    ImGui::SameLine();
+                    ImGui::ColorEdit3(defaultNames[ch], &channelColors_[ch].x,
+                                      ImGuiColorEditFlags_NoInputs);
+                    ImGui::PopID();
+                }
+            } else {
+                // Single-channel: color map + channel selector
+                const char* cmNames[] = {"Magma", "Viridis", "Inferno", "Plasma", "Grayscale"};
+                ImGui::SetNextItemWidth(-1);
+                if (ImGui::Combo("##colormap", &colorMapIdx_, cmNames,
+                                 static_cast<int>(ColorMapType::Count))) {
+                    colorMap_.setType(static_cast<ColorMapType>(colorMapIdx_));
+                    waterfall_.setColorMap(colorMap_);
+                    saveConfig();
+                }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Color Map");
+
+                if (nCh > 1) {
+                    ImGui::SetNextItemWidth(-1);
+                    if (ImGui::SliderInt("##wfch", &waterfallChannel_, 0, nCh - 1))
+                        waterfallChannel_ = std::clamp(waterfallChannel_, 0, nCh - 1);
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Waterfall Channel");
+                }
+            }
+        }
+    }
+
+    // ── Math ──
+    ImGui::Spacing();
+    if (ImGui::CollapsingHeader("Math")) {
+        renderMathPanel();
+    }
+
+    // ── Cursors ──
+    ImGui::Spacing();
+    if (ImGui::CollapsingHeader("Cursors", ImGuiTreeNodeFlags_DefaultOpen)) {
+        cursors_.drawPanel();
+    }
+
+    // ── Status (bottom) ──
     ImGui::Separator();
-    ImGui::Text("FFT: %d pt, %.1f Hz/bin",
-                settings_.fftSize,
-                settings_.sampleRate / settings_.fftSize);
-    ImGui::Text("Sample Rate: %.0f Hz", settings_.sampleRate);
-    ImGui::Text("Mode: %s", settings_.isIQ ? "I/Q (Complex)"
-                : (settings_.numChannels > 1 ? "Multi-channel Real" : "Real"));
+    ImGui::TextDisabled("Mode: %s", settings_.isIQ ? "I/Q"
+                        : (settings_.numChannels > 1 ? "Multi-ch" : "Real"));
 
     int pkCh2 = std::clamp(waterfallChannel_, 0, analyzer_.numSpectra() - 1);
     auto [peakBin, peakDB] = analyzer_.findPeak(pkCh2);
     double peakFreq = analyzer_.binToFreq(peakBin);
     if (std::abs(peakFreq) >= 1e6)
-        ImGui::Text("Peak: %.6f MHz, %.1f dB", peakFreq / 1e6, peakDB);
+        ImGui::TextDisabled("Peak: %.6f MHz, %.1f dB", peakFreq / 1e6, peakDB);
     else if (std::abs(peakFreq) >= 1e3)
-        ImGui::Text("Peak: %.3f kHz, %.1f dB", peakFreq / 1e3, peakDB);
+        ImGui::TextDisabled("Peak: %.3f kHz, %.1f dB", peakFreq / 1e3, peakDB);
     else
-        ImGui::Text("Peak: %.1f Hz, %.1f dB", peakFreq, peakDB);
+        ImGui::TextDisabled("Peak: %.1f Hz, %.1f dB", peakFreq, peakDB);
 }
 
 void Application::renderSpectrumPanel() {
@@ -1129,9 +1182,6 @@ void Application::computeMathChannels() {
 }
 
 void Application::renderMathPanel() {
-    ImGui::Text("Channel Math");
-    ImGui::Separator();
-
     int nPhys = analyzer_.numSpectra();
 
     // Build source channel name list.
@@ -1195,6 +1245,68 @@ void Application::renderMathPanel() {
         mc.color = {1.0f, 1.0f, 0.5f, 1.0f};
         mathChannels_.push_back(mc);
     }
+}
+
+void Application::loadConfig() {
+    config_.load();
+    fftSizeIdx_   = config_.getInt("fft_size_idx", fftSizeIdx_);
+    overlapPct_   = config_.getFloat("overlap_pct", overlapPct_);
+    windowIdx_    = config_.getInt("window_idx", windowIdx_);
+    colorMapIdx_  = config_.getInt("colormap_idx", colorMapIdx_);
+    minDB_        = config_.getFloat("min_db", minDB_);
+    maxDB_        = config_.getFloat("max_db", maxDB_);
+    int fs        = config_.getInt("freq_scale", static_cast<int>(freqScale_));
+    freqScale_    = static_cast<FreqScale>(fs);
+    vsync_        = config_.getBool("vsync", vsync_);
+    spectrumFrac_ = config_.getFloat("spectrum_frac", spectrumFrac_);
+    showSidebar_  = config_.getBool("show_sidebar", showSidebar_);
+    specDisplay_.peakHoldEnable = config_.getBool("peak_hold", specDisplay_.peakHoldEnable);
+    specDisplay_.peakHoldDecay  = config_.getFloat("peak_hold_decay", specDisplay_.peakHoldDecay);
+
+    // Clamp
+    fftSizeIdx_   = std::clamp(fftSizeIdx_, 0, kNumFFTSizes - 1);
+    windowIdx_    = std::clamp(windowIdx_, 0, static_cast<int>(WindowType::Count) - 1);
+    colorMapIdx_  = std::clamp(colorMapIdx_, 0, static_cast<int>(ColorMapType::Count) - 1);
+    spectrumFrac_ = std::clamp(spectrumFrac_, 0.1f, 0.9f);
+
+    // Find device by saved name.
+    std::string devName = config_.getString("device_name", "");
+    if (!devName.empty()) {
+        for (int i = 0; i < static_cast<int>(paDevices_.size()); ++i) {
+            if (paDevices_[i].name == devName) {
+                paDeviceIdx_ = i;
+                break;
+            }
+        }
+    }
+
+    // Apply
+    settings_.fftSize = kFFTSizes[fftSizeIdx_];
+    settings_.overlap = overlapPct_ / 100.0f;
+    settings_.window  = static_cast<WindowType>(windowIdx_);
+    colorMap_.setType(static_cast<ColorMapType>(colorMapIdx_));
+    SDL_GL_SetSwapInterval(vsync_ ? 1 : 0);
+}
+
+void Application::saveConfig() const {
+    Config cfg;
+    cfg.setInt("fft_size_idx", fftSizeIdx_);
+    cfg.setFloat("overlap_pct", overlapPct_);
+    cfg.setInt("window_idx", windowIdx_);
+    cfg.setInt("colormap_idx", colorMapIdx_);
+    cfg.setFloat("min_db", minDB_);
+    cfg.setFloat("max_db", maxDB_);
+    cfg.setInt("freq_scale", static_cast<int>(freqScale_));
+    cfg.setBool("vsync", vsync_);
+    cfg.setFloat("spectrum_frac", spectrumFrac_);
+    cfg.setBool("show_sidebar", showSidebar_);
+    cfg.setBool("peak_hold", specDisplay_.peakHoldEnable);
+    cfg.setFloat("peak_hold_decay", specDisplay_.peakHoldDecay);
+
+    if (paDeviceIdx_ >= 0 && paDeviceIdx_ < static_cast<int>(paDevices_.size()))
+        cfg.setString("device_name", paDevices_[paDeviceIdx_].name);
+
+    cfg.save();
 }
 
 } // namespace baudline
