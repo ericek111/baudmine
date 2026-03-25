@@ -37,9 +37,6 @@ void SpectrumAnalyzer::configure(const AnalyzerSettings& settings) {
         channelComplex_.assign(nSpec, std::vector<std::complex<float>>(specSz, {0,0}));
         channelWaterfalls_.assign(nSpec, {});
 
-        avgAccum_.assign(nSpec, std::vector<float>(specSz, 0.0f));
-        avgCount_ = 0;
-
         newSpectrumReady_ = false;
     }
 }
@@ -104,28 +101,6 @@ void SpectrumAnalyzer::processBlock() {
     for (auto& db : tempDBs)
         for (float& v : db)
             v += correction;
-
-    // Averaging (dB only; complex is not averaged — last block is kept).
-    if (settings_.averaging > 1) {
-        if (static_cast<int>(avgAccum_[0].size()) != specSz) {
-            for (auto& a : avgAccum_) a.assign(specSz, 0.0f);
-            avgCount_ = 0;
-        }
-        for (int ch = 0; ch < nSpec; ++ch)
-            for (int i = 0; i < specSz; ++i)
-                avgAccum_[ch][i] += tempDBs[ch][i];
-        avgCount_++;
-
-        if (avgCount_ >= settings_.averaging) {
-            for (int ch = 0; ch < nSpec; ++ch)
-                for (int i = 0; i < specSz; ++i)
-                    tempDBs[ch][i] = avgAccum_[ch][i] / avgCount_;
-            for (auto& a : avgAccum_) a.assign(specSz, 0.0f);
-            avgCount_ = 0;
-        } else {
-            return;
-        }
-    }
 
     for (int ch = 0; ch < nSpec; ++ch) {
         channelSpectra_[ch] = tempDBs[ch];

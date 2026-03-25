@@ -103,7 +103,6 @@ struct AnalyzerSettings {
     bool       isIQ        = false;         // true → complex input (2-ch interleaved)
     int        numChannels = 1;             // real channels (ignored when isIQ)
     double     sampleRate  = 48000.0;
-    int        averaging   = 1;             // number of spectra to average (1 = none)
 
     // Effective input channel count (for buffer sizing / deinterleaving).
     int inputChannels() const { return isIQ ? 2 : numChannels; }

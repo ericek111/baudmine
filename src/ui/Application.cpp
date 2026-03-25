@@ -270,13 +270,69 @@ void Application::render() {
 
     ImGui::SameLine();
 
-    // Spectrum + Waterfall
+    // Spectrum + Waterfall with draggable splitter
     ImGui::BeginChild("Display", {contentW, contentH}, false);
-    float specH = contentH * 0.35f;
-    float waterfH = contentH * 0.65f - 4;
+    {
+        constexpr float kSplitterH = 6.0f;
+        float specH  = contentH * spectrumFrac_;
+        float waterfH = contentH - specH - kSplitterH;
 
-    renderSpectrumPanel();
-    renderWaterfallPanel();
+        renderSpectrumPanel();
+
+        // ── Draggable splitter bar ──
+        ImVec2 splPos = ImGui::GetCursorScreenPos();
+        ImGui::InvisibleButton("##splitter", {contentW, kSplitterH});
+        bool hovered = ImGui::IsItemHovered();
+        bool active  = ImGui::IsItemActive();
+
+        if (hovered || active)
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+
+        if (active) {
+            float dy = ImGui::GetIO().MouseDelta.y;
+            spectrumFrac_ += dy / contentH;
+            spectrumFrac_ = std::clamp(spectrumFrac_, 0.1f, 0.9f);
+        }
+
+        // Draw splitter line
+        ImU32 splCol = (hovered || active)
+            ? IM_COL32(100, 150, 255, 220)
+            : IM_COL32(80, 80, 100, 150);
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        float cy = splPos.y + kSplitterH * 0.5f;
+        dl->AddLine({splPos.x, cy}, {splPos.x + contentW, cy}, splCol, 2.0f);
+
+        renderWaterfallPanel();
+
+        // ── Cross-panel hover line & frequency label ──
+        if (cursors_.hover.active && specSizeX_ > 0 && wfSizeX_ > 0) {
+            ImDrawList* dlp = ImGui::GetWindowDrawList();
+            float hx = specDisplay_.freqToScreenX(cursors_.hover.freq,
+                           specPosX_, specSizeX_, settings_.sampleRate,
+                           settings_.isIQ, freqScale_, viewLo_, viewHi_);
+            ImU32 hoverCol = IM_COL32(200, 200, 200, 80);
+
+            // Line spanning spectrum + splitter + waterfall
+            dlp->AddLine({hx, specPosY_}, {hx, wfPosY_ + wfSizeY_}, hoverCol, 1.0f);
+
+            // Frequency label at top of the line
+            char freqLabel[48];
+            double hf = cursors_.hover.freq;
+            if (std::abs(hf) >= 1e6)
+                std::snprintf(freqLabel, sizeof(freqLabel), "%.6f MHz", hf / 1e6);
+            else if (std::abs(hf) >= 1e3)
+                std::snprintf(freqLabel, sizeof(freqLabel), "%.3f kHz", hf / 1e3);
+            else
+                std::snprintf(freqLabel, sizeof(freqLabel), "%.1f Hz", hf);
+
+            ImVec2 tSz = ImGui::CalcTextSize(freqLabel);
+            float lx = std::min(hx + 4, specPosX_ + specSizeX_ - tSz.x - 4);
+            float ly = specPosY_ + 2;
+            dlp->AddRectFilled({lx - 2, ly - 1}, {lx + tSz.x + 2, ly + tSz.y + 1},
+                               IM_COL32(0, 0, 0, 180));
+            dlp->AddText({lx, ly}, IM_COL32(220, 220, 240, 240), freqLabel);
+        }
+    }
     ImGui::EndChild();
 
     ImGui::End();
@@ -356,10 +412,33 @@ void Application::renderControlPanel() {
         }
     }
 
-    // Overlap
-    if (ImGui::SliderFloat("Overlap", &overlapPct_, 0.0f, 95.0f, "%.1f%%")) {
-        settings_.overlap = overlapPct_ / 100.0f;
-        updateAnalyzerSettings();
+    // Overlap — inverted x⁴ curve: sensitive at the high end (90%+).
+    {
+        int hopSamples = static_cast<int>(settings_.fftSize * (1.0f - settings_.overlap));
+        if (hopSamples < 1) hopSamples = 1;
+        int overlapSamples = settings_.fftSize - hopSamples;
+
+        float sliderVal = 1.0f - std::pow(1.0f - overlapPct_ / 99.0f, 0.25f);
+        if (ImGui::SliderFloat("Overlap", &sliderVal, 0.0f, 1.0f, "")) {
+            float inv = 1.0f - sliderVal;
+            float inv2 = inv * inv;
+            overlapPct_ = 99.0f * (1.0f - inv2 * inv2);
+            settings_.overlap = overlapPct_ / 100.0f;
+            updateAnalyzerSettings();
+        }
+
+        // Draw overlay text centered on the slider frame (not the label).
+        char overlayText[64];
+        std::snprintf(overlayText, sizeof(overlayText), "%.1f%% (%d samples)", overlapPct_, overlapSamples);
+        ImVec2 textSize = ImGui::CalcTextSize(overlayText);
+        // The slider frame width = total widget width minus label.
+        // ImGui::CalcItemWidth() gives the frame width.
+        ImVec2 sliderMin = ImGui::GetItemRectMin();
+        float frameW = ImGui::CalcItemWidth();
+        float frameH = ImGui::GetItemRectMax().y - sliderMin.y;
+        float tx = sliderMin.x + (frameW - textSize.x) * 0.5f;
+        float ty = sliderMin.y + (frameH - textSize.y) * 0.5f;
+        ImGui::GetForegroundDrawList()->AddText({tx, ty}, IM_COL32(255, 255, 255, 220), overlayText);
     }
 
     // Window function
@@ -382,9 +461,6 @@ void Application::renderControlPanel() {
         }
     }
 
-    // Averaging
-    ImGui::SliderInt("Averaging", &settings_.averaging, 1, 32);
-
     ImGui::Separator();
     ImGui::Text("Display");
 
@@ -406,9 +482,33 @@ void Application::renderControlPanel() {
             freqScale_ = static_cast<FreqScale>(fs);
     }
 
+    // Zoom info & reset
+    if (viewLo_ > 0.0f || viewHi_ < 1.0f) {
+        float zoomPct = 1.0f / (viewHi_ - viewLo_);
+        ImGui::Text("Zoom: %.1fx", zoomPct);
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Reset")) {
+            viewLo_ = 0.0f;
+            viewHi_ = 1.0f;
+        }
+    }
+    ImGui::TextDisabled("Scroll: freq zoom | MMB drag: pan");
+    ImGui::TextDisabled("Ctrl+Scroll: dB zoom | MMB dbl: reset");
+
     // dB range
     ImGui::DragFloatRange2("dB Range", &minDB_, &maxDB_, 1.0f, -200.0f, 20.0f,
                            "Min: %.0f", "Max: %.0f");
+
+    // Peak hold
+    ImGui::Checkbox("Peak Hold", &specDisplay_.peakHoldEnable);
+    if (specDisplay_.peakHoldEnable) {
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(80);
+        ImGui::SliderFloat("Decay", &specDisplay_.peakHoldDecay, 0.0f, 120.0f, "%.0f dB/s");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Clear##peakhold"))
+            specDisplay_.clearPeakHold();
+    }
 
     // Channel colors (only shown for multi-channel)
     int nCh = analyzer_.numSpectra();
@@ -486,7 +586,11 @@ void Application::renderControlPanel() {
 
 void Application::renderSpectrumPanel() {
     float availW = ImGui::GetContentRegionAvail().x;
-    float specH = ImGui::GetContentRegionAvail().y * 0.35f;
+    // Use the parent's full content height (availY includes spectrum + splitter + waterfall)
+    // to compute the spectrum height from the split fraction.
+    constexpr float kSplitterH = 6.0f;
+    float parentH = ImGui::GetContentRegionAvail().y;
+    float specH = (parentH - kSplitterH) * spectrumFrac_;
 
     ImVec2 pos = ImGui::GetCursorScreenPos();
     specPosX_ = pos.x;
@@ -526,12 +630,15 @@ void Application::renderSpectrumPanel() {
         }
     }
 
+    specDisplay_.updatePeakHold(allSpectra);
     specDisplay_.draw(allSpectra, styles, minDB_, maxDB_,
                       settings_.sampleRate, settings_.isIQ, freqScale_,
-                      specPosX_, specPosY_, specSizeX_, specSizeY_);
+                      specPosX_, specPosY_, specSizeX_, specSizeY_,
+                      viewLo_, viewHi_);
 
     cursors_.draw(specDisplay_, specPosX_, specPosY_, specSizeX_, specSizeY_,
-                  settings_.sampleRate, settings_.isIQ, freqScale_, minDB_, maxDB_);
+                  settings_.sampleRate, settings_.isIQ, freqScale_, minDB_, maxDB_,
+                  viewLo_, viewHi_);
 
     handleSpectrumInput(specPosX_, specPosY_, specSizeX_, specSizeY_);
 
@@ -542,64 +649,113 @@ void Application::renderWaterfallPanel() {
     float availW = ImGui::GetContentRegionAvail().x;
     float availH = ImGui::GetContentRegionAvail().y;
 
-    int newW = static_cast<int>(availW);
-    int newH = static_cast<int>(availH);
-    if (newW < 1) newW = 1;
-    if (newH < 1) newH = 1;
+    // Fixed history depth — independent of screen height, so resizing the
+    // splitter doesn't recreate the texture every frame.
+    constexpr int kHistoryRows = 1024;
 
-    if (newW != waterfallW_ || newH != waterfallH_) {
-        waterfallW_ = newW;
-        waterfallH_ = newH;
-        waterfall_.resize(waterfallW_, waterfallH_);
+    // Only recreate when the bin count (FFT size) changes.
+    int binCount = std::max(1, analyzer_.spectrumSize());
+    if (binCount != waterfall_.width() || waterfall_.height() != kHistoryRows) {
+        waterfall_.resize(binCount, kHistoryRows);
         waterfall_.setColorMap(colorMap_);
     }
 
     if (waterfall_.textureID()) {
-        // Render waterfall texture with circular buffer offset.
-        // The texture rows wrap: currentRow_ is where the *next* line will go,
-        // so the *newest* line is at currentRow_+1.
-        float rowFrac = static_cast<float>(waterfall_.currentRow() + 1) /
-                        waterfall_.height();
-
-        // UV coordinates: bottom of display = newest = rowFrac
-        // top of display = oldest = rowFrac + 1.0 (wraps)
-        // We'll use two draw calls to handle the wrap, or use GL_REPEAT.
-        // Simplest: just render with ImGui::Image and accept minor visual glitch,
-        // or split into two parts.
-
         ImVec2 pos = ImGui::GetCursorScreenPos();
         ImDrawList* dl = ImGui::GetWindowDrawList();
         auto texID = static_cast<ImTextureID>(waterfall_.textureID());
 
         int h = waterfall_.height();
-        int cur = (waterfall_.currentRow() + 1) % h;
-        float splitFrac = static_cast<float>(h - cur) / h;
+        // The newest row was just written at currentRow()+1 (mod h) — but
+        // advanceRow already decremented, so currentRow() IS the newest.
+        // The row *after* currentRow() (i.e. currentRow()+1) is the oldest
+        // visible row.  We only want the most recent screenRows rows so
+        // that every texture row maps to exactly one screen pixel.
+        int screenRows = std::min(static_cast<int>(availH), h);
 
-        // Top part: rows from cur to h-1 (oldest)
-        float topH = availH * splitFrac;
-        dl->AddImage(texID,
-                     {pos.x, pos.y},
-                     {pos.x + availW, pos.y + topH},
-                     {0.0f, static_cast<float>(cur) / h},
-                     {1.0f, 1.0f});
+        // Newest row index in the circular buffer.
+        int newestRow = (waterfall_.currentRow() + 1) % h;
 
-        // Bottom part: rows from 0 to cur-1 (newest)
-        if (cur > 0) {
-            dl->AddImage(texID,
-                         {pos.x, pos.y + topH},
-                         {pos.x + availW, pos.y + availH},
-                         {0.0f, 0.0f},
-                         {1.0f, static_cast<float>(cur) / h});
+        // Render 1:1 (one texture row = one screen pixel), top-aligned,
+        // newest line at top (right below the spectrogram), scrolling down.
+        //
+        // advanceRow() decrements currentRow_, so rows are written at
+        // decreasing indices.  Going from newest to oldest = increasing
+        // index (mod h).  Normal V order (no flip needed).
+        float rowToV = 1.0f / h;
+        float screenY = pos.y;
+
+        bool logMode = (freqScale_ == FreqScale::Logarithmic && !settings_.isIQ);
+
+        auto drawSpan = [&](int rowStart, int rowCount, float yStart, float spanH) {
+            float v0 = rowStart * rowToV;
+            float v1 = (rowStart + rowCount) * rowToV;
+
+            if (!logMode) {
+                dl->AddImage(texID,
+                             {pos.x, yStart},
+                             {pos.x + availW, yStart + spanH},
+                             {viewLo_, v0}, {viewHi_, v1});
+            } else {
+                constexpr float kMinBinFrac = 0.001f;
+                float logMin2 = std::log10(kMinBinFrac);
+                float logMax2 = 0.0f;
+                int numStrips = std::min(512, static_cast<int>(availW));
+                for (int s = 0; s < numStrips; ++s) {
+                    float sL = static_cast<float>(s) / numStrips;
+                    float sR = static_cast<float>(s + 1) / numStrips;
+                    float vfL = viewLo_ + sL * (viewHi_ - viewLo_);
+                    float vfR = viewLo_ + sR * (viewHi_ - viewLo_);
+                    float uL = std::pow(10.0f, logMin2 + vfL * (logMax2 - logMin2));
+                    float uR = std::pow(10.0f, logMin2 + vfR * (logMax2 - logMin2));
+                    dl->AddImage(texID,
+                                 {pos.x + sL * availW, yStart},
+                                 {pos.x + sR * availW, yStart + spanH},
+                                 {uL, v0}, {uR, v1});
+                }
+            }
+        };
+
+        // From newestRow, walk forward (increasing index mod h) for
+        // screenRows steps to cover newest→oldest.
+        if (newestRow + screenRows <= h) {
+            // No wrap: rows [newestRow .. newestRow+screenRows)
+            drawSpan(newestRow, screenRows, screenY, static_cast<float>(screenRows));
+        } else {
+            // Wraps: [newestRow .. h), then [0 .. remainder)
+            int firstCount = h - newestRow;
+            float firstH = static_cast<float>(firstCount);
+            drawSpan(newestRow, firstCount, screenY, firstH);
+
+            int secondCount = screenRows - firstCount;
+            float secondH = static_cast<float>(secondCount);
+            if (secondCount > 0)
+                drawSpan(0, secondCount, screenY + firstH, secondH);
         }
 
-        // Frequency axis labels at bottom
+        // ── Frequency axis labels ──
         ImU32 textCol = IM_COL32(180, 180, 200, 200);
-        double freqMin = settings_.isIQ ? -settings_.sampleRate / 2.0 : 0.0;
-        double freqMax = settings_.isIQ ?  settings_.sampleRate / 2.0 : settings_.sampleRate / 2.0;
+        double freqFullMin = settings_.isIQ ? -settings_.sampleRate / 2.0 : 0.0;
+        double freqFullMax = settings_.isIQ ?  settings_.sampleRate / 2.0 : settings_.sampleRate / 2.0;
+
+        // Map a view fraction to frequency.  In log mode, viewLo_/viewHi_
+        // are in screen-fraction space; convert via the log mapping.
+        auto viewFracToFreq = [&](float vf) -> double {
+            if (logMode) {
+                constexpr float kMinBinFrac = 0.001f;
+                float logMin2 = std::log10(kMinBinFrac);
+                float logMax2 = 0.0f;
+                float binFrac = std::pow(10.0f, logMin2 + vf * (logMax2 - logMin2));
+                return freqFullMin + binFrac * (freqFullMax - freqFullMin);
+            }
+            return freqFullMin + vf * (freqFullMax - freqFullMin);
+        };
+
         int numLabels = 8;
         for (int i = 0; i <= numLabels; ++i) {
             float frac = static_cast<float>(i) / numLabels;
-            double freq = freqMin + frac * (freqMax - freqMin);
+            float vf = viewLo_ + frac * (viewHi_ - viewLo_);
+            double freq = viewFracToFreq(vf);
             float x = pos.x + frac * availW;
 
             char label[32];
@@ -611,6 +767,75 @@ void Application::renderWaterfallPanel() {
                 std::snprintf(label, sizeof(label), "%.0f", freq);
 
             dl->AddText({x + 2, pos.y + availH - 14}, textCol, label);
+        }
+
+        // Store waterfall geometry for cross-panel cursor drawing.
+        wfPosX_ = pos.x; wfPosY_ = pos.y; wfSizeX_ = availW; wfSizeY_ = availH;
+
+        // ── Mouse interaction: zoom, pan & hover on waterfall ──
+        ImGuiIO& io = ImGui::GetIO();
+        float mx = io.MousePos.x;
+        float my = io.MousePos.y;
+        bool inWaterfall = mx >= pos.x && mx <= pos.x + availW &&
+                           my >= pos.y && my <= pos.y + availH;
+
+        // Hover cursor from waterfall
+        if (inWaterfall) {
+            double freq = specDisplay_.screenXToFreq(mx, pos.x, availW,
+                                                      settings_.sampleRate,
+                                                      settings_.isIQ, freqScale_,
+                                                      viewLo_, viewHi_);
+            int bins = analyzer_.spectrumSize();
+            double fMin = settings_.isIQ ? -settings_.sampleRate / 2.0 : 0.0;
+            double fMax = settings_.isIQ ?  settings_.sampleRate / 2.0 : settings_.sampleRate / 2.0;
+            int bin = static_cast<int>((freq - fMin) / (fMax - fMin) * (bins - 1));
+            bin = std::clamp(bin, 0, bins - 1);
+
+            int curCh = std::clamp(waterfallChannel_, 0, analyzer_.numSpectra() - 1);
+            const auto& spec = analyzer_.channelSpectrum(curCh);
+            if (!spec.empty()) {
+                cursors_.hover = {true, freq, spec[bin], bin};
+            }
+        }
+
+        if (inWaterfall) {
+            // Scroll wheel: zoom centered on cursor
+            if (io.MouseWheel != 0) {
+                float cursorFrac = (mx - pos.x) / availW;  // 0..1 on screen
+                float viewFrac = viewLo_ + cursorFrac * (viewHi_ - viewLo_);
+
+                float zoomFactor = (io.MouseWheel > 0) ? 0.85f : 1.0f / 0.85f;
+                float newSpan = (viewHi_ - viewLo_) * zoomFactor;
+                newSpan = std::clamp(newSpan, 0.001f, 1.0f);
+
+                float newLo = viewFrac - cursorFrac * newSpan;
+                float newHi = newLo + newSpan;
+
+                // Clamp to [0, 1]
+                if (newLo < 0.0f) { newHi -= newLo; newLo = 0.0f; }
+                if (newHi > 1.0f) { newLo -= (newHi - 1.0f); newHi = 1.0f; }
+                viewLo_ = std::clamp(newLo, 0.0f, 1.0f);
+                viewHi_ = std::clamp(newHi, 0.0f, 1.0f);
+            }
+
+            // Middle-click + drag: pan
+            if (ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 1.0f)) {
+                float dx = io.MouseDelta.x;
+                float panFrac = -dx / availW * (viewHi_ - viewLo_);
+                float newLo = viewLo_ + panFrac;
+                float newHi = viewHi_ + panFrac;
+                float span = viewHi_ - viewLo_;
+                if (newLo < 0.0f) { newLo = 0.0f; newHi = span; }
+                if (newHi > 1.0f) { newHi = 1.0f; newLo = 1.0f - span; }
+                viewLo_ = newLo;
+                viewHi_ = newHi;
+            }
+
+            // Double-click: reset zoom
+            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Middle)) {
+                viewLo_ = 0.0f;
+                viewHi_ = 1.0f;
+            }
         }
     }
 
@@ -630,7 +855,8 @@ void Application::handleSpectrumInput(float posX, float posY,
         // Update hover cursor
         double freq = specDisplay_.screenXToFreq(mx, posX, sizeX,
                                                   settings_.sampleRate,
-                                                  settings_.isIQ, freqScale_);
+                                                  settings_.isIQ, freqScale_,
+                                                  viewLo_, viewHi_);
         float dB = specDisplay_.screenYToDB(my, posY, sizeY, minDB_, maxDB_);
 
         // Find closest bin
@@ -648,27 +874,65 @@ void Application::handleSpectrumInput(float posX, float posY,
         }
 
         // Left click: cursor A
-        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !io.WantCaptureMouse) {
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
             int peakBin = cursors_.findLocalPeak(spec, bin, 10);
             double peakFreq = analyzer_.binToFreq(peakBin);
             cursors_.setCursorA(peakFreq, spec[peakBin], peakBin);
         }
         // Right click: cursor B
-        if (ImGui::IsMouseClicked(ImGuiMouseButton_Right) && !io.WantCaptureMouse) {
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
             int peakBin = cursors_.findLocalPeak(spec, bin, 10);
             double peakFreq = analyzer_.binToFreq(peakBin);
             cursors_.setCursorB(peakFreq, spec[peakBin], peakBin);
         }
 
-        // Scroll: zoom dB range
-        if (io.MouseWheel != 0 && !io.WantCaptureMouse) {
-            float zoom = io.MouseWheel * 5.0f;
-            minDB_ += zoom;
-            maxDB_ -= zoom;
-            if (maxDB_ - minDB_ < 10.0f) {
-                float mid = (minDB_ + maxDB_) / 2.0f;
-                minDB_ = mid - 5.0f;
-                maxDB_ = mid + 5.0f;
+        {
+            // Ctrl+Scroll or Shift+Scroll: zoom dB range
+            if (io.MouseWheel != 0 && (io.KeyCtrl || io.KeyShift)) {
+                float zoom = io.MouseWheel * 5.0f;
+                minDB_ += zoom;
+                maxDB_ -= zoom;
+                if (maxDB_ - minDB_ < 10.0f) {
+                    float mid = (minDB_ + maxDB_) / 2.0f;
+                    minDB_ = mid - 5.0f;
+                    maxDB_ = mid + 5.0f;
+                }
+            }
+            // Scroll (no modifier): zoom frequency axis centered on cursor
+            else if (io.MouseWheel != 0) {
+                float cursorFrac = (mx - posX) / sizeX;
+                float viewFrac = viewLo_ + cursorFrac * (viewHi_ - viewLo_);
+
+                float zoomFactor = (io.MouseWheel > 0) ? 0.85f : 1.0f / 0.85f;
+                float newSpan = (viewHi_ - viewLo_) * zoomFactor;
+                newSpan = std::clamp(newSpan, 0.001f, 1.0f);
+
+                float newLo = viewFrac - cursorFrac * newSpan;
+                float newHi = newLo + newSpan;
+
+                if (newLo < 0.0f) { newHi -= newLo; newLo = 0.0f; }
+                if (newHi > 1.0f) { newLo -= (newHi - 1.0f); newHi = 1.0f; }
+                viewLo_ = std::clamp(newLo, 0.0f, 1.0f);
+                viewHi_ = std::clamp(newHi, 0.0f, 1.0f);
+            }
+
+            // Middle-click + drag: pan
+            if (ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 1.0f)) {
+                float dx = io.MouseDelta.x;
+                float panFrac = -dx / sizeX * (viewHi_ - viewLo_);
+                float newLo = viewLo_ + panFrac;
+                float newHi = viewHi_ + panFrac;
+                float span = viewHi_ - viewLo_;
+                if (newLo < 0.0f) { newLo = 0.0f; newHi = span; }
+                if (newHi > 1.0f) { newHi = 1.0f; newLo = 1.0f - span; }
+                viewLo_ = newLo;
+                viewHi_ = newHi;
+            }
+
+            // Double middle-click: reset zoom
+            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Middle)) {
+                viewLo_ = 0.0f;
+                viewHi_ = 1.0f;
             }
         }
     } else {
@@ -747,8 +1011,9 @@ void Application::updateAnalyzerSettings() {
 
         // Re-init waterfall texture so the old image from a different FFT
         // size doesn't persist.
-        if (waterfallW_ > 0 && waterfallH_ > 0)
-            waterfall_.init(waterfallW_, waterfallH_);
+        constexpr int kHistoryRows = 1024;
+        int binCount2 = std::max(1, analyzer_.spectrumSize());
+        waterfall_.init(binCount2, kHistoryRows);
     }
 }
 

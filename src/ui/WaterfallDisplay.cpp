@@ -11,12 +11,12 @@ WaterfallDisplay::~WaterfallDisplay() {
     if (texture_) glDeleteTextures(1, &texture_);
 }
 
-void WaterfallDisplay::init(int width, int height) {
-    width_  = width;
+void WaterfallDisplay::init(int binCount, int height) {
+    width_  = binCount;
     height_ = height;
     currentRow_ = height_ - 1;
 
-    pixelBuf_.resize(width_ * height_ * 3, 0);
+    pixelBuf_.assign(width_ * height_ * 3, 0);
 
     if (texture_) glDeleteTextures(1, &texture_);
     glGenTextures(1, &texture_);
@@ -30,17 +30,9 @@ void WaterfallDisplay::init(int width, int height) {
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-void WaterfallDisplay::resize(int width, int height) {
-    if (width == width_ && height == height_) return;
-    init(width, height);
-}
-
-float WaterfallDisplay::sampleBin(const std::vector<float>& spec, float binF) {
-    int bins = static_cast<int>(spec.size());
-    int b0 = static_cast<int>(binF);
-    int b1 = std::min(b0 + 1, bins - 1);
-    float t = binF - b0;
-    return spec[b0] * (1.0f - t) + spec[b1] * t;
+void WaterfallDisplay::resize(int binCount, int height) {
+    if (binCount == width_ && height == height_) return;
+    init(binCount, height);
 }
 
 void WaterfallDisplay::advanceRow() {
@@ -57,9 +49,9 @@ void WaterfallDisplay::pushLine(const std::vector<float>& spectrumDB,
     int row = currentRow_;
     int rowOffset = row * width_ * 3;
 
+    // One texel per bin — direct 1:1 mapping.
     for (int x = 0; x < width_; ++x) {
-        float frac = static_cast<float>(x) / (width_ - 1);
-        float dB = sampleBin(spectrumDB, frac * (bins - 1));
+        float dB = (x < bins) ? spectrumDB[x] : -200.0f;
         Color3 c = colorMap_.mapDB(dB, minDB, maxDB);
 
         pixelBuf_[rowOffset + x * 3 + 0] = c.r;
@@ -85,10 +77,8 @@ void WaterfallDisplay::pushLineMulti(
     float range = maxDB - minDB;
     if (range < 1.0f) range = 1.0f;
 
+    // One texel per bin — direct 1:1 mapping.
     for (int x = 0; x < width_; ++x) {
-        float frac = static_cast<float>(x) / (width_ - 1);
-
-        // Accumulate color contributions from each enabled channel.
         float accR = 0.0f, accG = 0.0f, accB = 0.0f;
 
         for (int ch = 0; ch < nCh; ++ch) {
@@ -97,7 +87,7 @@ void WaterfallDisplay::pushLineMulti(
             if (channelSpectra[ch].empty()) continue;
 
             int bins = static_cast<int>(channelSpectra[ch].size());
-            float dB = sampleBin(channelSpectra[ch], frac * (bins - 1));
+            float dB = (x < bins) ? channelSpectra[ch][x] : -200.0f;
             float intensity = std::clamp((dB - minDB) / range, 0.0f, 1.0f);
 
             accR += channels[ch].r * intensity;

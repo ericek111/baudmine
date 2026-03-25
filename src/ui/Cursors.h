@@ -23,7 +23,8 @@ public:
     void draw(const SpectrumDisplay& specDisplay,
               float posX, float posY, float sizeX, float sizeY,
               double sampleRate, bool isIQ, FreqScale freqScale,
-              float minDB, float maxDB) const;
+              float minDB, float maxDB,
+              float viewLo = 0.0f, float viewHi = 1.0f) const;
 
     // Draw cursor readout panel (ImGui widgets).
     void drawPanel() const;

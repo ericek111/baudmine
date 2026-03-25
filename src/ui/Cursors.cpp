@@ -29,13 +29,15 @@ void Cursors::update(const std::vector<float>& spectrumDB,
 void Cursors::draw(const SpectrumDisplay& specDisplay,
                    float posX, float posY, float sizeX, float sizeY,
                    double sampleRate, bool isIQ, FreqScale freqScale,
-                   float minDB, float maxDB) const {
+                   float minDB, float maxDB,
+                   float viewLo, float viewHi) const {
     ImDrawList* dl = ImGui::GetWindowDrawList();
 
     auto drawCursor = [&](const CursorInfo& c, ImU32 color, const char* label) {
         if (!c.active) return;
         float x = specDisplay.freqToScreenX(c.freq, posX, sizeX,
-                                             sampleRate, isIQ, freqScale);
+                                             sampleRate, isIQ, freqScale,
+                                             viewLo, viewHi);
         float dbNorm = (c.dB - minDB) / (maxDB - minDB);
         dbNorm = std::clamp(dbNorm, 0.0f, 1.0f);
         float y = posY + sizeY * (1.0f - dbNorm);
@@ -93,12 +95,7 @@ void Cursors::draw(const SpectrumDisplay& specDisplay,
         dl->AddText({tx, ty}, IM_COL32(255, 200, 100, 255), buf);
     }
 
-    // Hover cursor
-    if (hover.active) {
-        float x = specDisplay.freqToScreenX(hover.freq, posX, sizeX,
-                                             sampleRate, isIQ, freqScale);
-        dl->AddLine({x, posY}, {x, posY + sizeY}, IM_COL32(200, 200, 200, 80), 1.0f);
-    }
+    // (Hover cursor line is drawn cross-panel by Application.)
 }
 
 void Cursors::drawPanel() const {

@@ -58,10 +58,6 @@ private:
     size_t              accumPos_ = 0;
     size_t              hopSize_  = 0;
 
-    // Per-channel averaging
-    std::vector<std::vector<float>> avgAccum_;
-    int                             avgCount_ = 0;
-
     // Per-channel output: magnitude (dB) and complex
     std::vector<std::vector<float>>                  channelSpectra_;
     std::vector<std::vector<std::complex<float>>>    channelComplex_;

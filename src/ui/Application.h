@@ -113,8 +113,8 @@ private:
     float     maxDB_       = 0.0f;
     FreqScale freqScale_   = FreqScale::Linear;
     bool      paused_      = false;
-    int       waterfallW_  = 0;
-    int       waterfallH_  = 0;
+    // (waterfallW_ removed — texture width tracks bin count automatically)
+    // (waterfallH_ removed — fixed history depth of 1024 rows)
 
     // FFT size options
     static constexpr int kFFTSizes[] = {256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536};
@@ -159,8 +159,17 @@ private:
     std::vector<MathChannel>          mathChannels_;
     std::vector<std::vector<float>>   mathSpectra_;  // computed each frame
 
-    // Spectrum panel geometry (stored for cursor interaction)
+    // Frequency zoom/pan (normalized 0–1 over full bandwidth)
+    float viewLo_ = 0.0f;   // left edge
+    float viewHi_ = 1.0f;   // right edge
+
+    // Spectrum/waterfall split ratio (fraction of content height for spectrum)
+    float spectrumFrac_ = 0.35f;
+    bool  draggingSplit_ = false;
+
+    // Panel geometry (stored for cursor interaction)
     float specPosX_ = 0, specPosY_ = 0, specSizeX_ = 0, specSizeY_ = 0;
+    float wfPosX_ = 0, wfPosY_ = 0, wfSizeX_ = 0, wfSizeY_ = 0;
 };
 
 } // namespace baudline
