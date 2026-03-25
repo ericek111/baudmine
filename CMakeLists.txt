@@ -19,7 +19,6 @@ find_package(OpenGL REQUIRED)
 
 pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
 pkg_check_modules(FFTW3F REQUIRED IMPORTED_TARGET fftw3f)
-pkg_check_modules(PORTAUDIO REQUIRED IMPORTED_TARGET portaudio-2.0)
 pkg_check_modules(SNDFILE REQUIRED IMPORTED_TARGET sndfile)
 
 # ── ImGui via FetchContent ────────────────────────────────────────────────────
@@ -55,7 +54,7 @@ set(SOURCES
     src/dsp/WindowFunctions.cpp
     src/dsp/FFTProcessor.cpp
     src/dsp/SpectrumAnalyzer.cpp
-    src/audio/PortAudioSource.cpp
+    src/audio/MiniAudioSource.cpp
     src/audio/FileSource.cpp
     src/ui/ColorMap.cpp
     src/ui/WaterfallDisplay.cpp
@@ -71,13 +70,12 @@ target_link_libraries(baudline PRIVATE
     imgui
     PkgConfig::SDL2
     PkgConfig::FFTW3F
-    PkgConfig::PORTAUDIO
     PkgConfig::SNDFILE
     OpenGL::GL
     pthread
 )
 
-# Link math library on Unix
+# Link math library and dl on Unix (dl needed by miniaudio for backend loading)
 if(UNIX)
-    target_link_libraries(baudline PRIVATE m)
+    target_link_libraries(baudline PRIVATE m dl)
 endif()

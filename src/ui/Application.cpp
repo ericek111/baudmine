@@ -78,7 +78,7 @@ bool Application::init(int argc, char** argv) {
     ImGui_ImplOpenGL3_Init("#version 120");
 
     // Enumerate audio devices
-    paDevices_ = PortAudioSource::listInputDevices();
+    paDevices_ = MiniAudioSource::listInputDevices();
 
     // Load saved config (overwrites defaults for FFT size, overlap, window, etc.)
     loadConfig();
@@ -302,7 +302,7 @@ void Application::render() {
                     saveConfig();
                 }
             }
-            if (ImGui::MenuItem("Open PortAudio")) {
+            if (ImGui::MenuItem("Open Audio Device")) {
                 openPortAudio();
                 updateAnalyzerSettings();
             }
@@ -1094,14 +1094,14 @@ void Application::openPortAudio() {
     if (paDeviceIdx_ >= 0 && paDeviceIdx_ < static_cast<int>(paDevices_.size()))
         reqCh = std::min(paDevices_[paDeviceIdx_].maxInputChannels, kMaxChannels);
     if (reqCh < 1) reqCh = 1;
-    auto src = std::make_unique<PortAudioSource>(sr, reqCh, deviceIdx);
+    auto src = std::make_unique<MiniAudioSource>(sr, reqCh, deviceIdx);
     if (src->open()) {
         audioSource_ = std::move(src);
         settings_.sampleRate = sr;
         settings_.isIQ = false;
         settings_.numChannels = audioSource_->channels();
     } else {
-        std::fprintf(stderr, "Failed to open PortAudio device\n");
+        std::fprintf(stderr, "Failed to open audio device\n");
     }
 }
 

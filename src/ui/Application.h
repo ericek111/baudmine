@@ -4,7 +4,7 @@
 #include "core/Config.h"
 #include "dsp/SpectrumAnalyzer.h"
 #include "audio/AudioSource.h"
-#include "audio/PortAudioSource.h"
+#include "audio/MiniAudioSource.h"
 #include "ui/ColorMap.h"
 #include "ui/WaterfallDisplay.h"
 #include "ui/SpectrumDisplay.h"
@@ -144,7 +144,7 @@ private:
     bool        fileLoop_ = true;
 
     // Device selection
-    std::vector<PortAudioSource::DeviceInfo> paDevices_;
+    std::vector<MiniAudioSource::DeviceInfo> paDevices_;
     int paDeviceIdx_ = 0;
 
     // Channel colors (up to kMaxChannels).  Defaults: L=purple, R=green.
