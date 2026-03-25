@@ -5,6 +5,14 @@
 
 namespace baudmine {
 
+int WaterfallDisplay::maxTexSize_ = 0;
+
+static int queryMaxTextureSize() {
+    GLint s = 4096;
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &s);
+    return s;
+}
+
 WaterfallDisplay::WaterfallDisplay() = default;
 
 WaterfallDisplay::~WaterfallDisplay() {
@@ -12,50 +20,50 @@ WaterfallDisplay::~WaterfallDisplay() {
 }
 
 void WaterfallDisplay::init(int binCount, int height) {
+    if (maxTexSize_ == 0) maxTexSize_ = queryMaxTextureSize();
+
     width_  = binCount;
+    texW_   = std::min(binCount, maxTexSize_);
     height_ = height;
     currentRow_ = height_ - 1;
 
-    pixelBuf_.assign(width_ * height_ * 3, 0);
+    pixelBuf_.assign(texW_ * height_ * 3, 0);
 
     if (texture_) glDeleteTextures(1, &texture_);
     glGenTextures(1, &texture_);
     glBindTexture(GL_TEXTURE_2D, texture_);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);  // RGB rows may not be 4-byte aligned
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width_, height_, 0,
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, texW_, height_, 0,
                  GL_RGB, GL_UNSIGNED_BYTE, pixelBuf_.data());
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 void WaterfallDisplay::resize(int binCount, int height) {
-    if (binCount == width_ && height == height_) return;
+    if (maxTexSize_ == 0) maxTexSize_ = queryMaxTextureSize();
 
-    // If width unchanged and height is growing, preserve existing data.
-    if (binCount == width_ && height > height_ && height_ > 0 && texture_) {
+    int newTexW = std::min(binCount, maxTexSize_);
+    if (newTexW == texW_ && height == height_ && binCount == width_) return;
+
+    // If texture width unchanged and height is growing, preserve existing data.
+    if (newTexW == texW_ && binCount == width_ && height > height_ && height_ > 0 && texture_) {
         int oldH = height_;
         int oldRow = currentRow_;
         std::vector<uint8_t> oldBuf = std::move(pixelBuf_);
 
-        width_  = binCount;
         height_ = height;
-        pixelBuf_.assign(width_ * height_ * 3, 0);
+        pixelBuf_.assign(texW_ * height_ * 3, 0);
 
-        // Copy old rows into the new buffer, preserving their circular order.
-        // Old rows occupy indices 0..oldH-1; new rows oldH..height-1 are black.
-        // The circular position stays the same since old indices are valid in
-        // the larger buffer.
-        int rowBytes = width_ * 3;
+        int rowBytes = texW_ * 3;
         for (int r = 0; r < oldH; ++r)
             std::memcpy(pixelBuf_.data() + r * rowBytes,
                         oldBuf.data() + r * rowBytes, rowBytes);
 
         currentRow_ = oldRow;
 
-        // Recreate texture at new size and upload all data.
         if (texture_) glDeleteTextures(1, &texture_);
         glGenTextures(1, &texture_);
         glBindTexture(GL_TEXTURE_2D, texture_);
@@ -64,7 +72,7 @@ void WaterfallDisplay::resize(int binCount, int height) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width_, height_, 0,
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, texW_, height_, 0,
                      GL_RGB, GL_UNSIGNED_BYTE, pixelBuf_.data());
         return;
     }
@@ -76,21 +84,33 @@ void WaterfallDisplay::advanceRow() {
     currentRow_ = (currentRow_ - 1 + height_) % height_;
 }
 
+// Sample a bin value at fractional position using the max of covered bins.
+// This avoids losing narrow-band signals when downsampling.
+static inline float sampleBinMax(const float* data, int bins, float x0, float x1) {
+    int i0 = std::max(0, static_cast<int>(x0));
+    int i1 = std::min(bins - 1, static_cast<int>(x1));
+    float v = -200.0f;
+    for (int i = i0; i <= i1; ++i)
+        v = std::max(v, data[i]);
+    return v;
+}
+
 // ── Single-channel (colormap) mode ───────────────────────────────────────────
 
 void WaterfallDisplay::pushLine(const std::vector<float>& spectrumDB,
                                 float minDB, float maxDB) {
-    if (width_ == 0 || height_ == 0) return;
+    if (texW_ == 0 || height_ == 0) return;
 
     int bins = static_cast<int>(spectrumDB.size());
     int row = currentRow_;
-    int rowOffset = row * width_ * 3;
+    int rowOffset = row * texW_ * 3;
+    float scale = static_cast<float>(width_) / texW_;
 
-    // One texel per bin — direct 1:1 mapping.
-    for (int x = 0; x < width_; ++x) {
-        float dB = (x < bins) ? spectrumDB[x] : -200.0f;
+    for (int x = 0; x < texW_; ++x) {
+        float b0 = x * scale;
+        float b1 = (x + 1) * scale - 1.0f;
+        float dB = (bins > 0) ? sampleBinMax(spectrumDB.data(), bins, b0, b1) : -200.0f;
         Color3 c = colorMap_.mapDB(dB, minDB, maxDB);
-
         pixelBuf_[rowOffset + x * 3 + 0] = c.r;
         pixelBuf_[rowOffset + x * 3 + 1] = c.g;
         pixelBuf_[rowOffset + x * 3 + 2] = c.b;
@@ -106,16 +126,15 @@ void WaterfallDisplay::pushLineMulti(
         const std::vector<std::vector<float>>& channelSpectra,
         const std::vector<WaterfallChannelInfo>& channels,
         float minDB, float maxDB) {
-    if (width_ == 0 || height_ == 0) return;
+    if (texW_ == 0 || height_ == 0) return;
 
     int row = currentRow_;
-    int rowOffset = row * width_ * 3;
+    int rowOffset = row * texW_ * 3;
     float range = maxDB - minDB;
     if (range < 1.0f) range = 1.0f;
     float invRange = 1.0f / range;
 
-    // Pre-filter enabled channels to avoid per-texel branching.
-    struct ActiveCh { const float* data; int bins; float r, g, b; };
+    // Pre-filter enabled channels.
     activeChBuf_.clear();
     int nCh = std::min(static_cast<int>(channelSpectra.size()),
                        static_cast<int>(channels.size()));
@@ -126,12 +145,21 @@ void WaterfallDisplay::pushLineMulti(
                                 channels[ch].r, channels[ch].g, channels[ch].b});
     }
 
-    // One texel per bin — direct 1:1 mapping.
-    for (int x = 0; x < width_; ++x) {
+    float scale = static_cast<float>(width_) / texW_;
+    bool needResample = (texW_ != width_);
+
+    for (int x = 0; x < texW_; ++x) {
         float accR = 0.0f, accG = 0.0f, accB = 0.0f;
 
         for (const auto& ac : activeChBuf_) {
-            float dB = (x < ac.bins) ? ac.data[x] : -200.0f;
+            float dB;
+            if (!needResample) {
+                dB = (x < ac.bins) ? ac.data[x] : -200.0f;
+            } else {
+                float b0 = x * scale;
+                float b1 = (x + 1) * scale - 1.0f;
+                dB = sampleBinMax(ac.data, ac.bins, b0, b1);
+            }
             float intensity = std::clamp((dB - minDB) * invRange, 0.0f, 1.0f);
 
             accR += ac.r * intensity;
@@ -154,10 +182,9 @@ void WaterfallDisplay::pushLineMulti(
 void WaterfallDisplay::uploadRow(int row) {
     glBindTexture(GL_TEXTURE_2D, texture_);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, row, width_, 1,
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, row, texW_, 1,
                     GL_RGB, GL_UNSIGNED_BYTE,
-                    pixelBuf_.data() + row * width_ * 3);
-    // Note: no unbind — ImGui will bind its own textures before drawing.
+                    pixelBuf_.data() + row * texW_ * 3);
 }
 
 } // namespace baudmine

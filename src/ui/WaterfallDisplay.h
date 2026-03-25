@@ -18,19 +18,20 @@ public:
     WaterfallDisplay();
     ~WaterfallDisplay();
 
-    // Initialize with bin-resolution width and history height.
-    // width = number of FFT bins (spectrum size), height = history rows.
+    // Initialize with bin count and history height.
+    // Texture width is capped to GPU max texture size; bins are resampled if needed.
     void init(int binCount, int height);
 
-    // Single-channel colormap mode.  One texel per bin — no frequency remapping.
+    // Single-channel colormap mode.
     void pushLine(const std::vector<float>& spectrumDB, float minDB, float maxDB);
 
-    // Multi-channel overlay mode.  One texel per bin.
+    // Multi-channel overlay mode.
     void pushLineMulti(const std::vector<std::vector<float>>& channelSpectra,
                        const std::vector<WaterfallChannelInfo>& channels,
                        float minDB, float maxDB);
 
     GLuint textureID()  const { return texture_; }
+    int    texWidth()   const { return texW_; }
     int    width()      const { return width_; }
     int    height()     const { return height_; }
     int    currentRow() const { return currentRow_; }
@@ -43,9 +44,11 @@ private:
     void advanceRow();
 
     GLuint               texture_ = 0;
-    int                  width_   = 0;
+    int                  width_   = 0;   // logical width (bin count)
+    int                  texW_    = 0;   // actual texture width (<= GPU max)
     int                  height_  = 0;
     int                  currentRow_ = 0;
+    static int           maxTexSize_;    // cached GL_MAX_TEXTURE_SIZE
 
     ColorMap             colorMap_;
     std::vector<uint8_t> pixelBuf_;
