@@ -757,8 +757,30 @@ void Application::renderControlPanel() {
 
     // ── Cursors ──
     ImGui::Spacing();
-    if (ImGui::CollapsingHeader("Cursors", ImGuiTreeNodeFlags_DefaultOpen)) {
-        cursors_.drawPanel();
+    {
+        float btnW = ImGui::CalcTextSize("Reset").x + ImGui::GetStyle().FramePadding.x * 2;
+        float gap = ImGui::GetStyle().ItemSpacing.x * 0.25f;
+        ImVec2 hdrMin = ImGui::GetCursorScreenPos();
+        float winLeft = ImGui::GetWindowPos().x;
+        float hdrRight = hdrMin.x + ImGui::GetContentRegionAvail().x;
+        ImGui::PushClipRect({winLeft, hdrMin.y}, {hdrRight - btnW - gap, hdrMin.y + 200}, true);
+        bool cursorsOpen = ImGui::CollapsingHeader("##cursors_hdr",
+                                                    ImGuiTreeNodeFlags_DefaultOpen |
+                                                    ImGuiTreeNodeFlags_AllowOverlap);
+        ImGui::PopClipRect();
+        ImGui::SameLine();
+        ImGui::Text("Cursors");
+        ImGui::SameLine();
+        ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - btnW + ImGui::GetStyle().FramePadding.x);
+        if (ImGui::SmallButton("Reset##cursors")) {
+            cursors_.cursorA.active = false;
+            cursors_.cursorB.active = false;
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Clear cursors A and B");
+
+        if (cursorsOpen) {
+            cursors_.drawPanel();
+        }
     }
 
     // ── Measurements ──
