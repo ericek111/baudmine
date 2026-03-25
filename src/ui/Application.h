@@ -184,6 +184,18 @@ private:
     HoverPanel hoverPanel_ = HoverPanel::None;
     float      hoverWfTimeOffset_ = 0.0f;  // seconds from newest line
 
+    // Touch gesture state (pinch-zoom / two-finger pan)
+    struct TouchState {
+        int    count = 0;         // active finger count
+        float  startDist = 0.0f;  // initial distance between two fingers
+        float  startLo = 0.0f;    // viewLo_ at gesture start
+        float  startHi = 0.0f;    // viewHi_ at gesture start
+        float  startCenterX = 0.0f; // midpoint screen-X at gesture start
+        float  lastCenterX = 0.0f;  // last midpoint screen-X
+        float  lastDist = 0.0f;   // last distance between fingers
+    } touch_;
+    void handleTouchEvent(const SDL_Event& event);
+
     // Config persistence
     Config config_;
 

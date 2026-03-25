@@ -143,6 +143,7 @@ void Application::mainLoopStep() {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         ImGui_ImplSDL2_ProcessEvent(&event);
+        handleTouchEvent(event);
         if (event.type == SDL_QUIT)
             running_ = false;
         if (event.type == SDL_KEYDOWN) {
@@ -1120,6 +1121,75 @@ void Application::renderWaterfallPanel() {
     }
 
     ImGui::Dummy({availW, availH});
+}
+
+void Application::handleTouchEvent(const SDL_Event& event) {
+    if (event.type == SDL_FINGERDOWN) {
+        ++touch_.count;
+    } else if (event.type == SDL_FINGERUP) {
+        touch_.count = std::max(0, touch_.count - 1);
+    }
+
+    // Two-finger gesture start: snapshot state
+    if (touch_.count == 2 && event.type == SDL_FINGERDOWN) {
+        int w, h;
+        SDL_GetWindowSize(window_, &w, &h);
+        // Get both finger positions from SDL touch API
+        SDL_TouchID tid = event.tfinger.touchId;
+        int nf = SDL_GetNumTouchFingers(tid);
+        if (nf >= 2) {
+            SDL_Finger* f0 = SDL_GetTouchFinger(tid, 0);
+            SDL_Finger* f1 = SDL_GetTouchFinger(tid, 1);
+            float x0 = f0->x * w, x1 = f1->x * w;
+            float dx = x1 - x0, dy = (f1->y - f0->y) * h;
+            touch_.startDist = std::sqrt(dx * dx + dy * dy);
+            touch_.lastDist = touch_.startDist;
+            touch_.startCenterX = (x0 + x1) * 0.5f;
+            touch_.lastCenterX = touch_.startCenterX;
+            touch_.startLo = viewLo_;
+            touch_.startHi = viewHi_;
+        }
+    }
+
+    // Two-finger motion: pinch + pan
+    if (touch_.count == 2 && event.type == SDL_FINGERMOTION) {
+        int w, h;
+        SDL_GetWindowSize(window_, &w, &h);
+        SDL_TouchID tid = event.tfinger.touchId;
+        int nf = SDL_GetNumTouchFingers(tid);
+        if (nf >= 2) {
+            SDL_Finger* f0 = SDL_GetTouchFinger(tid, 0);
+            SDL_Finger* f1 = SDL_GetTouchFinger(tid, 1);
+            float x0 = f0->x * w, x1 = f1->x * w;
+            float dx = x1 - x0, dy = (f1->y - f0->y) * h;
+            float dist = std::sqrt(dx * dx + dy * dy);
+            float centerX = (x0 + x1) * 0.5f;
+
+            if (touch_.startDist > 1.0f) {
+                // Zoom: scale the span by start/current distance ratio
+                float span0 = touch_.startHi - touch_.startLo;
+                float ratio = touch_.startDist / std::max(dist, 1.0f);
+                float newSpan = std::clamp(span0 * ratio, 0.001f, 1.0f);
+
+                // Anchor zoom at the initial midpoint (in view-fraction space)
+                float panelW = wfSizeX_ > 0 ? wfSizeX_ : static_cast<float>(w);
+                float panelX = wfPosX_;
+                float midFrac = (touch_.startCenterX - panelX) / panelW;
+                float midView = touch_.startLo + midFrac * span0;
+
+                // Pan: shift by finger midpoint movement
+                float panDelta = -(centerX - touch_.startCenterX) / panelW * newSpan;
+
+                float newLo = midView - midFrac * newSpan + panDelta;
+                float newHi = newLo + newSpan;
+
+                if (newLo < 0.0f) { newHi -= newLo; newLo = 0.0f; }
+                if (newHi > 1.0f) { newLo -= (newHi - 1.0f); newHi = 1.0f; }
+                viewLo_ = std::clamp(newLo, 0.0f, 1.0f);
+                viewHi_ = std::clamp(newHi, 0.0f, 1.0f);
+            }
+        }
+    }
 }
 
 void Application::handleSpectrumInput(float posX, float posY,
