@@ -6,7 +6,6 @@
 namespace baudline {
 
 SpectrumAnalyzer::SpectrumAnalyzer() {
-    // Force sizeChanged=true on first configure by setting fftSize to 0.
     settings_.fftSize = 0;
     configure(AnalyzerSettings{});
 }
@@ -35,6 +34,7 @@ void SpectrumAnalyzer::configure(const AnalyzerSettings& settings) {
         int specSz = fft_.spectrumSize();
 
         channelSpectra_.assign(nSpec, std::vector<float>(specSz, -200.0f));
+        channelComplex_.assign(nSpec, std::vector<std::complex<float>>(specSz, {0,0}));
         channelWaterfalls_.assign(nSpec, {});
 
         avgAccum_.assign(nSpec, std::vector<float>(specSz, 0.0f));
@@ -64,7 +64,6 @@ void SpectrumAnalyzer::pushSamples(const float* data, size_t frames) {
         if (accumPos_ >= bufLen) {
             processBlock();
 
-            // Shift by hopSize for overlap
             size_t hopSamples = hopSize_ * inCh;
             size_t keep = bufLen - hopSamples;
             std::memmove(accumBuf_.data(), accumBuf_.data() + hopSamples,
@@ -80,36 +79,33 @@ void SpectrumAnalyzer::processBlock() {
     int nSpec = static_cast<int>(channelSpectra_.size());
     int specSz = fft_.spectrumSize();
 
-    // Compute per-channel spectra.
     std::vector<std::vector<float>> tempDBs(nSpec);
+    std::vector<std::vector<std::complex<float>>> tempCplx(nSpec);
 
     if (settings_.isIQ) {
-        // I/Q: treat the 2 interleaved channels as one complex signal.
         std::vector<float> windowed(N * 2);
         for (int i = 0; i < N; ++i) {
             windowed[2 * i]     = accumBuf_[2 * i]     * window_[i];
             windowed[2 * i + 1] = accumBuf_[2 * i + 1] * window_[i];
         }
-        fft_.processComplex(windowed.data(), tempDBs[0]);
+        fft_.processComplex(windowed.data(), tempDBs[0], tempCplx[0]);
     } else {
-        // Real: deinterleave and FFT each channel independently.
         std::vector<float> chanBuf(N);
         for (int ch = 0; ch < nSpec; ++ch) {
-            // Deinterleave channel `ch` from the accumulation buffer.
             for (int i = 0; i < N; ++i)
                 chanBuf[i] = accumBuf_[i * inCh + ch];
             WindowFunctions::apply(window_, chanBuf.data(), N);
-            fft_.processReal(chanBuf.data(), tempDBs[ch]);
+            fft_.processReal(chanBuf.data(), tempDBs[ch], tempCplx[ch]);
         }
     }
 
-    // Correct for window gain.
+    // Window gain correction.
     float correction = -20.0f * std::log10(windowGain_ > 0 ? windowGain_ : 1.0f);
     for (auto& db : tempDBs)
         for (float& v : db)
             v += correction;
 
-    // Averaging.
+    // Averaging (dB only; complex is not averaged — last block is kept).
     if (settings_.averaging > 1) {
         if (static_cast<int>(avgAccum_[0].size()) != specSz) {
             for (auto& a : avgAccum_) a.assign(specSz, 0.0f);
@@ -131,9 +127,9 @@ void SpectrumAnalyzer::processBlock() {
         }
     }
 
-    // Store results.
     for (int ch = 0; ch < nSpec; ++ch) {
         channelSpectra_[ch] = tempDBs[ch];
+        channelComplex_[ch] = tempCplx[ch];
         channelWaterfalls_[ch].push_back(tempDBs[ch]);
         if (channelWaterfalls_[ch].size() > kWaterfallHistory)
             channelWaterfalls_[ch].pop_front();

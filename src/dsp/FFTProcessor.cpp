@@ -38,10 +38,13 @@ void FFTProcessor::configure(int fftSize, bool complexInput) {
     }
 }
 
-void FFTProcessor::processReal(const float* input, std::vector<float>& outputDB) {
+void FFTProcessor::processReal(const float* input,
+                               std::vector<float>& outputDB,
+                               std::vector<std::complex<float>>& outputCplx) {
     const int N = fftSize_;
     const int bins = N / 2 + 1;
     outputDB.resize(bins);
+    outputCplx.resize(bins);
 
     std::copy(input, input + N, realIn_);
     fftwf_execute(realPlan_);
@@ -50,17 +53,19 @@ void FFTProcessor::processReal(const float* input, std::vector<float>& outputDB)
     for (int i = 0; i < bins; ++i) {
         float re = realOut_[i][0] * scale;
         float im = realOut_[i][1] * scale;
+        outputCplx[i] = {re, im};
         float mag2 = re * re + im * im;
-        // Power in dB, floor at -200 dB
         outputDB[i] = (mag2 > 1e-20f) ? 10.0f * std::log10(mag2) : -200.0f;
     }
 }
 
-void FFTProcessor::processComplex(const float* inputIQ, std::vector<float>& outputDB) {
+void FFTProcessor::processComplex(const float* inputIQ,
+                                  std::vector<float>& outputDB,
+                                  std::vector<std::complex<float>>& outputCplx) {
     const int N = fftSize_;
     outputDB.resize(N);
+    outputCplx.resize(N);
 
-    // Copy interleaved I/Q into FFTW complex array
     for (int i = 0; i < N; ++i) {
         cplxIn_[i][0] = inputIQ[2 * i];
         cplxIn_[i][1] = inputIQ[2 * i + 1];
@@ -68,18 +73,27 @@ void FFTProcessor::processComplex(const float* inputIQ, std::vector<float>& outp
 
     fftwf_execute(cplxPlan_);
 
-    // FFT-shift: reorder so DC is in center.
-    // FFTW output: [0, 1, ..., N/2-1, -N/2, ..., -1]
-    // Shifted:     [-N/2, ..., -1, 0, 1, ..., N/2-1]
     const float scale = 1.0f / N;
     const int half = N / 2;
     for (int i = 0; i < N; ++i) {
         int src = (i + half) % N;
         float re = cplxOut_[src][0] * scale;
         float im = cplxOut_[src][1] * scale;
+        outputCplx[i] = {re, im};
         float mag2 = re * re + im * im;
         outputDB[i] = (mag2 > 1e-20f) ? 10.0f * std::log10(mag2) : -200.0f;
     }
+}
+
+// Convenience overloads (no complex output).
+void FFTProcessor::processReal(const float* input, std::vector<float>& outputDB) {
+    std::vector<std::complex<float>> dummy;
+    processReal(input, outputDB, dummy);
+}
+
+void FFTProcessor::processComplex(const float* inputIQ, std::vector<float>& outputDB) {
+    std::vector<std::complex<float>> dummy;
+    processComplex(inputIQ, outputDB, dummy);
 }
 
 } // namespace baudline

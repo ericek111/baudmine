@@ -178,17 +178,29 @@ void Application::processAudio() {
         analyzer_.pushSamples(audioBuf_.data(), framesRead);
 
         if (analyzer_.hasNewSpectrum()) {
+            computeMathChannels();
+
             int nSpec = analyzer_.numSpectra();
             if (waterfallMultiCh_ && nSpec > 1) {
-                // Multi-channel overlay waterfall.
-                std::vector<WaterfallChannelInfo> wfChInfo(nSpec);
+                // Multi-channel overlay waterfall: physical + math channels.
+                std::vector<std::vector<float>> wfSpectra;
+                std::vector<WaterfallChannelInfo> wfChInfo;
+
                 for (int ch = 0; ch < nSpec; ++ch) {
                     const auto& c = channelColors_[ch % kMaxChannels];
-                    wfChInfo[ch] = {c.x, c.y, c.z,
-                                    channelEnabled_[ch % kMaxChannels]};
+                    wfSpectra.push_back(analyzer_.channelSpectrum(ch));
+                    wfChInfo.push_back({c.x, c.y, c.z,
+                                        channelEnabled_[ch % kMaxChannels]});
                 }
-                waterfall_.pushLineMulti(analyzer_.allSpectra(),
-                                         wfChInfo, minDB_, maxDB_);
+                for (size_t mi = 0; mi < mathChannels_.size(); ++mi) {
+                    if (mathChannels_[mi].enabled && mathChannels_[mi].waterfall &&
+                        mi < mathSpectra_.size()) {
+                        const auto& c = mathChannels_[mi].color;
+                        wfSpectra.push_back(mathSpectra_[mi]);
+                        wfChInfo.push_back({c.x, c.y, c.z, true});
+                    }
+                }
+                waterfall_.pushLineMulti(wfSpectra, wfChInfo, minDB_, maxDB_);
             } else {
                 int wfCh = std::clamp(waterfallChannel_, 0, nSpec - 1);
                 waterfall_.pushLine(analyzer_.channelSpectrum(wfCh),
@@ -424,6 +436,10 @@ void Application::renderControlPanel() {
         }
     }
 
+    // Math channels section (always shown).
+    ImGui::Separator();
+    renderMathPanel();
+
     ImGui::Separator();
 
     // Playback controls
@@ -478,18 +494,39 @@ void Application::renderSpectrumPanel() {
     specSizeX_ = availW;
     specSizeY_ = specH;
 
-    // Build per-channel styles and pass all spectra.
-    int nCh = analyzer_.numSpectra();
-    std::vector<ChannelStyle> styles(nCh);
-    for (int ch = 0; ch < nCh; ++ch) {
+    // Build per-channel styles and combine physical + math spectra.
+    int nPhys = analyzer_.numSpectra();
+    int nMath = static_cast<int>(mathSpectra_.size());
+    int nTotal = nPhys + nMath;
+
+    std::vector<std::vector<float>> allSpectra;
+    std::vector<ChannelStyle> styles;
+    allSpectra.reserve(nTotal);
+    styles.reserve(nTotal);
+
+    // Physical channels.
+    for (int ch = 0; ch < nPhys; ++ch) {
+        allSpectra.push_back(analyzer_.channelSpectrum(ch));
         const auto& c = channelColors_[ch % kMaxChannels];
         uint8_t r = static_cast<uint8_t>(c.x * 255);
         uint8_t g = static_cast<uint8_t>(c.y * 255);
         uint8_t b = static_cast<uint8_t>(c.z * 255);
-        styles[ch].lineColor = IM_COL32(r, g, b, 220);
-        styles[ch].fillColor = IM_COL32(r, g, b, 35);
+        styles.push_back({IM_COL32(r, g, b, 220), IM_COL32(r, g, b, 35)});
     }
-    specDisplay_.draw(analyzer_.allSpectra(), styles, minDB_, maxDB_,
+
+    // Math channels.
+    for (int mi = 0; mi < nMath; ++mi) {
+        if (mi < static_cast<int>(mathChannels_.size()) && mathChannels_[mi].enabled) {
+            allSpectra.push_back(mathSpectra_[mi]);
+            const auto& c = mathChannels_[mi].color;
+            uint8_t r = static_cast<uint8_t>(c.x * 255);
+            uint8_t g = static_cast<uint8_t>(c.y * 255);
+            uint8_t b = static_cast<uint8_t>(c.z * 255);
+            styles.push_back({IM_COL32(r, g, b, 220), IM_COL32(r, g, b, 35)});
+        }
+    }
+
+    specDisplay_.draw(allSpectra, styles, minDB_, maxDB_,
                       settings_.sampleRate, settings_.isIQ, freqScale_,
                       specPosX_, specPosY_, specSizeX_, specSizeY_);
 
@@ -712,6 +749,171 @@ void Application::updateAnalyzerSettings() {
         // size doesn't persist.
         if (waterfallW_ > 0 && waterfallH_ > 0)
             waterfall_.init(waterfallW_, waterfallH_);
+    }
+}
+
+// ── Math channels ────────────────────────────────────────────────────────────
+
+void Application::computeMathChannels() {
+    int nPhys = analyzer_.numSpectra();
+    int specSz = analyzer_.spectrumSize();
+    mathSpectra_.resize(mathChannels_.size());
+
+    for (size_t mi = 0; mi < mathChannels_.size(); ++mi) {
+        const auto& mc = mathChannels_[mi];
+        auto& out = mathSpectra_[mi];
+        out.resize(specSz);
+
+        if (!mc.enabled) {
+            std::fill(out.begin(), out.end(), -200.0f);
+            continue;
+        }
+
+        int sx = std::clamp(mc.sourceX, 0, nPhys - 1);
+        int sy = std::clamp(mc.sourceY, 0, nPhys - 1);
+        const auto& xDB = analyzer_.channelSpectrum(sx);
+        const auto& yDB = analyzer_.channelSpectrum(sy);
+        const auto& xC  = analyzer_.channelComplex(sx);
+        const auto& yC  = analyzer_.channelComplex(sy);
+
+        for (int i = 0; i < specSz; ++i) {
+            float val = -200.0f;
+            switch (mc.op) {
+                // ── Unary ──
+                case MathOp::Negate:
+                    val = -xDB[i];
+                    break;
+                case MathOp::Absolute:
+                    val = std::abs(xDB[i]);
+                    break;
+                case MathOp::Square:
+                    val = 2.0f * xDB[i];
+                    break;
+                case MathOp::Cube:
+                    val = 3.0f * xDB[i];
+                    break;
+                case MathOp::Sqrt:
+                    val = 0.5f * xDB[i];
+                    break;
+                case MathOp::Log: {
+                    // log10 of linear magnitude, back to dB-like scale.
+                    float lin = std::pow(10.0f, xDB[i] / 10.0f);
+                    float l = std::log10(lin + 1e-30f);
+                    val = 10.0f * l;  // keep in dB-like range
+                    break;
+                }
+                // ── Binary ──
+                case MathOp::Add: {
+                    float lx = std::pow(10.0f, xDB[i] / 10.0f);
+                    float ly = std::pow(10.0f, yDB[i] / 10.0f);
+                    float s = lx + ly;
+                    val = (s > 1e-20f) ? 10.0f * std::log10(s) : -200.0f;
+                    break;
+                }
+                case MathOp::Subtract: {
+                    float lx = std::pow(10.0f, xDB[i] / 10.0f);
+                    float ly = std::pow(10.0f, yDB[i] / 10.0f);
+                    float d = std::abs(lx - ly);
+                    val = (d > 1e-20f) ? 10.0f * std::log10(d) : -200.0f;
+                    break;
+                }
+                case MathOp::Multiply:
+                    val = xDB[i] + yDB[i];
+                    break;
+                case MathOp::Phase: {
+                    if (i < static_cast<int>(xC.size()) &&
+                        i < static_cast<int>(yC.size())) {
+                        auto cross = xC[i] * std::conj(yC[i]);
+                        float deg = std::atan2(cross.imag(), cross.real())
+                                    * (180.0f / 3.14159265f);
+                        // Map [-180, 180] degrees into the dB display range
+                        // so it's visible on the plot.
+                        val = deg;
+                    }
+                    break;
+                }
+                case MathOp::CrossCorr: {
+                    if (i < static_cast<int>(xC.size()) &&
+                        i < static_cast<int>(yC.size())) {
+                        auto cross = xC[i] * std::conj(yC[i]);
+                        float mag2 = std::norm(cross);
+                        val = (mag2 > 1e-20f) ? 10.0f * std::log10(mag2) : -200.0f;
+                    }
+                    break;
+                }
+                default: break;
+            }
+            out[i] = val;
+        }
+    }
+}
+
+void Application::renderMathPanel() {
+    ImGui::Text("Channel Math");
+    ImGui::Separator();
+
+    int nPhys = analyzer_.numSpectra();
+
+    // Build source channel name list.
+    static const char* chNames[] = {
+        "Ch 0 (L)", "Ch 1 (R)", "Ch 2", "Ch 3", "Ch 4", "Ch 5", "Ch 6", "Ch 7"
+    };
+
+    // List existing math channels.
+    int toRemove = -1;
+    for (int mi = 0; mi < static_cast<int>(mathChannels_.size()); ++mi) {
+        auto& mc = mathChannels_[mi];
+        ImGui::PushID(1000 + mi);
+
+        ImGui::Checkbox("##en", &mc.enabled);
+        ImGui::SameLine();
+        ImGui::ColorEdit3("##col", &mc.color.x, ImGuiColorEditFlags_NoInputs);
+        ImGui::SameLine();
+
+        // Operation combo.
+        if (ImGui::BeginCombo("##op", mathOpName(mc.op), ImGuiComboFlags_NoPreview)) {
+            for (int o = 0; o < static_cast<int>(MathOp::Count); ++o) {
+                auto op = static_cast<MathOp>(o);
+                if (ImGui::Selectable(mathOpName(op), mc.op == op))
+                    mc.op = op;
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::SameLine();
+        ImGui::Text("%s", mathOpName(mc.op));
+
+        // Source X.
+        ImGui::SetNextItemWidth(80);
+        ImGui::Combo("X", &mc.sourceX, chNames, std::min(nPhys, kMaxChannels));
+
+        // Source Y (only for binary ops).
+        if (mathOpIsBinary(mc.op)) {
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(80);
+            ImGui::Combo("Y", &mc.sourceY, chNames, std::min(nPhys, kMaxChannels));
+        }
+
+        ImGui::SameLine();
+        ImGui::Checkbox("WF", &mc.waterfall);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Show on waterfall");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("X##del"))
+            toRemove = mi;
+
+        ImGui::PopID();
+    }
+
+    if (toRemove >= 0)
+        mathChannels_.erase(mathChannels_.begin() + toRemove);
+
+    if (ImGui::Button("+ Add Math Channel")) {
+        MathChannel mc;
+        mc.op = MathOp::Subtract;
+        mc.sourceX = 0;
+        mc.sourceY = std::min(1, nPhys - 1);
+        mc.color = {1.0f, 1.0f, 0.5f, 1.0f};
+        mathChannels_.push_back(mc);
     }
 }
 
