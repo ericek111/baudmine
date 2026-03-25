@@ -45,6 +45,7 @@ public:
     CursorInfo cursorA;
     CursorInfo cursorB;
     bool       showDelta = true;
+    bool       snapToPeaks = true;
 
     // Hover cursor (follows mouse, always active)
     CursorInfo hover;

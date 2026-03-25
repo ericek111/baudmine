@@ -1112,17 +1112,17 @@ void Application::handleSpectrumInput(float posX, float posY,
             cursors_.hover = {true, freq, dB, bin};
         }
 
-        // Left click: cursor A
-        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-            int peakBin = cursors_.findLocalPeak(spec, bin, 10);
-            double peakFreq = analyzer_.binToFreq(peakBin);
-            cursors_.setCursorA(peakFreq, spec[peakBin], peakBin);
+        // Left drag: cursor A
+        if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+            int cBin = cursors_.snapToPeaks ? cursors_.findLocalPeak(spec, bin, 10) : bin;
+            double cFreq = analyzer_.binToFreq(cBin);
+            cursors_.setCursorA(cFreq, spec[cBin], cBin);
         }
-        // Right click: cursor B
-        if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
-            int peakBin = cursors_.findLocalPeak(spec, bin, 10);
-            double peakFreq = analyzer_.binToFreq(peakBin);
-            cursors_.setCursorB(peakFreq, spec[peakBin], peakBin);
+        // Right drag: cursor B
+        if (ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
+            int cBin = cursors_.snapToPeaks ? cursors_.findLocalPeak(spec, bin, 10) : bin;
+            double cFreq = analyzer_.binToFreq(cBin);
+            cursors_.setCursorB(cFreq, spec[cBin], cBin);
         }
 
         {

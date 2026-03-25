@@ -83,7 +83,7 @@ void Cursors::draw(const SpectrumDisplay& specDisplay,
 
     float aDB = avgDBA(), bDB = avgDBB();
     drawCursorMarker(cursorA, aDB, IM_COL32(255, 255, 0, 220));
-    drawCursorMarker(cursorB, bDB, IM_COL32(0, 200, 255, 220));
+    drawCursorMarker(cursorB, bDB, IM_COL32(100, 220, 255, 220));
 
     // Draw labels at the top, touching the cursor's vertical line.
     // If the label would overflow the right edge, flip it to the left side.
@@ -113,7 +113,7 @@ void Cursors::draw(const SpectrumDisplay& specDisplay,
     };
 
     drawCursorLabel(cursorA, aDB, IM_COL32(255, 255, 0, 220), "A", 0);
-    drawCursorLabel(cursorB, bDB, IM_COL32(0, 200, 255, 220), "B", cursorA.active ? 1 : 0);
+    drawCursorLabel(cursorB, bDB, IM_COL32(100, 220, 255, 220), "B", cursorA.active ? 1 : 0);
 
     // Delta display (two lines, column-aligned on '=')
     if (showDelta && cursorA.active && cursorB.active) {
@@ -155,6 +155,8 @@ void Cursors::drawPanel() {
         fmtFreqDB(dbuf, sizeof(dbuf), "D", dF, dA);
         ImGui::Text("%s", dbuf);
     }
+
+    ImGui::Checkbox("Snap to peaks", &snapToPeaks);
 
     // Averaging slider (logarithmic scale)
     ImGui::SetNextItemWidth(-1);
