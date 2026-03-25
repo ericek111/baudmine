@@ -580,16 +580,22 @@ void Application::renderControlPanel() {
         bool isMulti = waterfallMultiCh_ && nCh > 1;
 
         // Header with inline Single/Multi toggle
+        float widgetW = (nCh > 1) ? 60.0f : 0.0f;
+        float gap = ImGui::GetStyle().ItemSpacing.x * 0.25f;
+        ImVec2 hdrMin = ImGui::GetCursorScreenPos();
+        float winLeft = ImGui::GetWindowPos().x;
+        float hdrRight = hdrMin.x + ImGui::GetContentRegionAvail().x;
+        ImGui::PushClipRect({winLeft, hdrMin.y}, {hdrRight - widgetW - gap, hdrMin.y + 200}, true);
         bool headerOpen = ImGui::CollapsingHeader("##channels_hdr",
                                                    ImGuiTreeNodeFlags_DefaultOpen |
                                                    ImGuiTreeNodeFlags_AllowOverlap);
+        ImGui::PopClipRect();
         ImGui::SameLine();
         ImGui::Text("Channels");
         if (nCh > 1) {
             ImGui::SameLine();
-            float btnW = 60.0f;
-            ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - btnW);
-            if (ImGui::Button(isMulti ? " Multi " : "Single ", {btnW, 0})) {
+            ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - widgetW + ImGui::GetStyle().FramePadding.x);
+            if (ImGui::Button(isMulti ? " Multi " : "Single ", {widgetW, 0})) {
                 waterfallMultiCh_ = !waterfallMultiCh_;
             }
         }
@@ -632,8 +638,35 @@ void Application::renderControlPanel() {
 
     // ── Math ──
     ImGui::Spacing();
-    if (ImGui::CollapsingHeader("Math")) {
-        renderMathPanel();
+    {
+        float btnW = ImGui::GetFrameHeight();
+        float gap = ImGui::GetStyle().ItemSpacing.x * 0.25f;
+        ImVec2 hdrMin = ImGui::GetCursorScreenPos();
+        float winLeft = ImGui::GetWindowPos().x;
+        float hdrRight = hdrMin.x + ImGui::GetContentRegionAvail().x;
+        ImGui::PushClipRect({winLeft, hdrMin.y}, {hdrRight - btnW - gap, hdrMin.y + 200}, true);
+        bool mathOpen = ImGui::CollapsingHeader("##math_hdr",
+                                                 ImGuiTreeNodeFlags_DefaultOpen |
+                                                 ImGuiTreeNodeFlags_AllowOverlap);
+        ImGui::PopClipRect();
+        ImGui::SameLine();
+        ImGui::Text("Math");
+        ImGui::SameLine();
+        ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - btnW + ImGui::GetStyle().FramePadding.x);
+        if (ImGui::Button("+##addmath", {btnW, 0})) {
+            int nPhys = analyzer_.numSpectra();
+            MathChannel mc;
+            mc.op = MathOp::Subtract;
+            mc.sourceX = 0;
+            mc.sourceY = std::min(1, nPhys - 1);
+            mc.color = {1.0f, 1.0f, 0.5f, 1.0f};
+            mathChannels_.push_back(mc);
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Add math channel");
+
+        if (mathOpen) {
+            renderMathPanel();
+        }
     }
 
     // ── Cursors ──
@@ -645,13 +678,20 @@ void Application::renderControlPanel() {
     // ── Measurements ──
     ImGui::Spacing();
     {
+        float cbW = ImGui::GetFrameHeight();
+        float gap = ImGui::GetStyle().ItemSpacing.x * 0.25f;
+        ImVec2 hdrMin = ImGui::GetCursorScreenPos();
+        float winLeft = ImGui::GetWindowPos().x;
+        float hdrRight = hdrMin.x + ImGui::GetContentRegionAvail().x;
+        ImGui::PushClipRect({winLeft, hdrMin.y}, {hdrRight - cbW - gap, hdrMin.y + 200}, true);
         bool headerOpen = ImGui::CollapsingHeader("##meas_hdr",
+                                                   ImGuiTreeNodeFlags_DefaultOpen |
                                                    ImGuiTreeNodeFlags_AllowOverlap);
+        ImGui::PopClipRect();
         ImGui::SameLine();
         ImGui::Text("Measurements");
         ImGui::SameLine();
-        ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x
-                             - ImGui::GetFrameHeight());
+        ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - cbW + ImGui::GetStyle().FramePadding.x);
         ImGui::Checkbox("##meas_en", &measurements_.enabled);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Enable measurements");
 
@@ -1267,15 +1307,6 @@ void Application::renderMathPanel() {
 
     if (toRemove >= 0)
         mathChannels_.erase(mathChannels_.begin() + toRemove);
-
-    if (ImGui::Button("+ Add Math Channel")) {
-        MathChannel mc;
-        mc.op = MathOp::Subtract;
-        mc.sourceX = 0;
-        mc.sourceY = std::min(1, nPhys - 1);
-        mc.color = {1.0f, 1.0f, 0.5f, 1.0f};
-        mathChannels_.push_back(mc);
-    }
 }
 
 void Application::loadConfig() {

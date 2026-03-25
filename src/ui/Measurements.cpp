@@ -157,10 +157,7 @@ void Measurements::drawWaterfall(const SpectrumDisplay& specDisplay,
 }
 
 void Measurements::drawPanel() {
-    if (!enabled) {
-        ImGui::TextDisabled("Disabled");
-        return;
-    }
+    if (!enabled) return;
 
     ImGui::SetNextItemWidth(-1);
     ImGui::SliderInt("##maxpeaks", &maxPeaks, 1, 20, "Peaks: %d");
