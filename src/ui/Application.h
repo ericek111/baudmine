@@ -179,6 +179,11 @@ private:
     float specPosX_ = 0, specPosY_ = 0, specSizeX_ = 0, specSizeY_ = 0;
     float wfPosX_ = 0, wfPosY_ = 0, wfSizeX_ = 0, wfSizeY_ = 0;
 
+    // Hover state: which panel is being hovered
+    enum class HoverPanel { None, Spectrum, Waterfall };
+    HoverPanel hoverPanel_ = HoverPanel::None;
+    float      hoverWfTimeOffset_ = 0.0f;  // seconds from newest line
+
     // Config persistence
     Config config_;
 

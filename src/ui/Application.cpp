@@ -267,6 +267,8 @@ void Application::render() {
     ImGui_ImplSDL2_NewFrame();
     ImGui::NewFrame();
 
+    hoverPanel_ = HoverPanel::None;
+
     // Full-screen layout
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -453,8 +455,8 @@ void Application::render() {
                            settings_.isIQ, freqScale_, viewLo_, viewHi_);
             ImU32 hoverCol = IM_COL32(200, 200, 200, 80);
 
-            // Line spanning waterfall + splitter + spectrum
-            dlp->AddLine({hx, wfPosY_}, {hx, specPosY_ + specSizeY_}, hoverCol, 1.0f);
+            // Line in spectrum area only
+            dlp->AddLine({hx, specPosY_}, {hx, specPosY_ + specSizeY_}, hoverCol, 1.0f);
 
             // Frequency label at top of waterfall
             char freqLabel[48];
@@ -472,6 +474,59 @@ void Application::render() {
             dlp->AddRectFilled({lx - 2, ly - 1}, {lx + tSz.x + 2, ly + tSz.y + 1},
                                IM_COL32(0, 0, 0, 180));
             dlp->AddText({lx, ly}, IM_COL32(220, 220, 240, 240), freqLabel);
+
+            // ── Hover info (right side of spectrum/waterfall) ──
+            {
+                // Use bin center for frequency
+                int bins = analyzer_.spectrumSize();
+                double fMin = settings_.isIQ ? -settings_.sampleRate / 2.0 : 0.0;
+                double fMax = settings_.isIQ ?  settings_.sampleRate / 2.0 : settings_.sampleRate / 2.0;
+                double binCenterFreq = fMin + (static_cast<double>(cursors_.hover.bin) + 0.5)
+                                       / bins * (fMax - fMin);
+
+                // Fixed-width frequency string to prevent jumping
+                char freqBuf[48];
+                if (std::abs(binCenterFreq) >= 1e6)
+                    std::snprintf(freqBuf, sizeof(freqBuf), "%12.6f MHz", binCenterFreq / 1e6);
+                else if (std::abs(binCenterFreq) >= 1e3)
+                    std::snprintf(freqBuf, sizeof(freqBuf), "%9.3f kHz", binCenterFreq / 1e3);
+                else
+                    std::snprintf(freqBuf, sizeof(freqBuf), "%7.1f Hz", binCenterFreq);
+
+                char valBuf[48];
+                if (hoverPanel_ == HoverPanel::Spectrum) {
+                    std::snprintf(valBuf, sizeof(valBuf), "%7.1f dB", cursors_.hover.dB);
+                } else if (hoverPanel_ == HoverPanel::Waterfall) {
+                    if (hoverWfTimeOffset_ >= 10.0f)
+                        std::snprintf(valBuf, sizeof(valBuf), "%7.1f s", -hoverWfTimeOffset_);
+                    else if (hoverWfTimeOffset_ >= 1.0f)
+                        std::snprintf(valBuf, sizeof(valBuf), "%7.2f s", -hoverWfTimeOffset_);
+                    else
+                        std::snprintf(valBuf, sizeof(valBuf), "%5.0f ms", -hoverWfTimeOffset_ * 1000.0f);
+                } else {
+                    valBuf[0] = '\0';
+                }
+
+                // Draw as a single right-aligned line, fixed-width value column
+                ImU32 hoverTextCol = IM_COL32(100, 230, 130, 240);
+                float rightEdge = specPosX_ + specSizeX_ - 8;
+                float hy2 = specPosY_ + 4;
+
+                // Use a fixed-width reference for the value column to prevent jumping
+                ImVec2 refSz = ImGui::CalcTextSize("-000.0 dB");
+                ImVec2 freqSz = ImGui::CalcTextSize(freqBuf);
+                float sepW = ImGui::CalcTextSize("  ").x;
+                float valColX = rightEdge - refSz.x;
+                float freqX = valColX - sepW - freqSz.x;
+
+                if (valBuf[0]) {
+                    ImVec2 valSz = ImGui::CalcTextSize(valBuf);
+                    dlp->AddText({freqX, hy2}, hoverTextCol, freqBuf);
+                    dlp->AddText({rightEdge - valSz.x, hy2}, hoverTextCol, valBuf);
+                } else {
+                    dlp->AddText({rightEdge - freqSz.x, hy2}, hoverTextCol, freqBuf);
+                }
+            }
         }
     }
     ImGui::EndChild();
@@ -951,6 +1006,7 @@ void Application::renderWaterfallPanel() {
 
         // Hover cursor from waterfall
         if (inWaterfall) {
+            hoverPanel_ = HoverPanel::Waterfall;
             double freq = specDisplay_.screenXToFreq(mx, pos.x, availW,
                                                       settings_.sampleRate,
                                                       settings_.isIQ, freqScale_,
@@ -960,6 +1016,13 @@ void Application::renderWaterfallPanel() {
             double fMax = settings_.isIQ ?  settings_.sampleRate / 2.0 : settings_.sampleRate / 2.0;
             int bin = static_cast<int>((freq - fMin) / (fMax - fMin) * (bins - 1));
             bin = std::clamp(bin, 0, bins - 1);
+
+            // Time offset: bottom = newest (0s), top = oldest
+            float yFrac = 1.0f - (my - pos.y) / availH;  // 0 at bottom, 1 at top
+            int hopSamples = static_cast<int>(settings_.fftSize * (1.0f - settings_.overlap));
+            if (hopSamples < 1) hopSamples = 1;
+            double secondsPerLine = static_cast<double>(hopSamples) / settings_.sampleRate;
+            hoverWfTimeOffset_ = static_cast<float>(yFrac * screenRows * secondsPerLine);
 
             int curCh = std::clamp(waterfallChannel_, 0, analyzer_.numSpectra() - 1);
             const auto& spec = analyzer_.channelSpectrum(curCh);
@@ -1022,6 +1085,7 @@ void Application::handleSpectrumInput(float posX, float posY,
                     my >= posY && my <= posY + sizeY;
 
     if (inRegion) {
+        hoverPanel_ = HoverPanel::Spectrum;
         // Update hover cursor
         double freq = specDisplay_.screenXToFreq(mx, posX, sizeX,
                                                   settings_.sampleRate,
@@ -1106,7 +1170,11 @@ void Application::handleSpectrumInput(float posX, float posY,
             }
         }
     } else {
-        cursors_.hover.active = false;
+        // Only clear hover if waterfall didn't already set it this frame
+        if (hoverPanel_ != HoverPanel::Waterfall) {
+            hoverPanel_ = HoverPanel::None;
+            cursors_.hover.active = false;
+        }
     }
 }
 
