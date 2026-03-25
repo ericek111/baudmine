@@ -254,7 +254,11 @@ void Measurements::drawPanel() {
             traceMinFreq = std::max(0.0f, minKHz * 1000.0f);
             traceMaxFreq = std::max(0.0f, maxKHz * 1000.0f);
         }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Peak trace frequency range (0 = no limit)");
+        if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+            traceMinFreq = 0.0f;
+            traceMaxFreq = 0.0f;
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Peak trace frequency range (right-click to reset)");
     }
     if (!enabled) return;
 

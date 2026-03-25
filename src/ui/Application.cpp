@@ -790,7 +790,11 @@ void Application::renderControlPanel() {
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Enable measurements");
 
         if (headerOpen) {
+            float prevMin = measurements_.traceMinFreq;
+            float prevMax = measurements_.traceMaxFreq;
             measurements_.drawPanel();
+            if (measurements_.traceMinFreq != prevMin || measurements_.traceMaxFreq != prevMax)
+                saveConfig();
         }
     }
 
@@ -1423,6 +1427,8 @@ void Application::loadConfig() {
     specDisplay_.peakHoldEnable = config_.getBool("peak_hold", specDisplay_.peakHoldEnable);
     specDisplay_.peakHoldDecay  = config_.getFloat("peak_hold_decay", specDisplay_.peakHoldDecay);
     cursors_.snapToPeaks        = config_.getBool("snap_to_peaks", cursors_.snapToPeaks);
+    measurements_.traceMinFreq  = config_.getFloat("trace_min_freq", measurements_.traceMinFreq);
+    measurements_.traceMaxFreq  = config_.getFloat("trace_max_freq", measurements_.traceMaxFreq);
 
     // Clamp
     fftSizeIdx_   = std::clamp(fftSizeIdx_, 0, kNumFFTSizes - 1);
@@ -1464,6 +1470,8 @@ void Application::saveConfig() const {
     cfg.setBool("peak_hold", specDisplay_.peakHoldEnable);
     cfg.setFloat("peak_hold_decay", specDisplay_.peakHoldDecay);
     cfg.setBool("snap_to_peaks", cursors_.snapToPeaks);
+    cfg.setFloat("trace_min_freq", measurements_.traceMinFreq);
+    cfg.setFloat("trace_max_freq", measurements_.traceMaxFreq);
 
     if (paDeviceIdx_ >= 0 && paDeviceIdx_ < static_cast<int>(paDevices_.size()))
         cfg.setString("device_name", paDevices_[paDeviceIdx_].name);
