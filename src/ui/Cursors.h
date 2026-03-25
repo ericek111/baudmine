@@ -5,7 +5,7 @@
 #include <deque>
 #include <vector>
 
-namespace baudline {
+namespace baudmine {
 
 struct CursorInfo {
     bool   active = false;
@@ -68,4 +68,4 @@ private:
     void pushAvg(AvgState& st, float dB, int bin) const;
 };
 
-} // namespace baudline
+} // namespace baudmine

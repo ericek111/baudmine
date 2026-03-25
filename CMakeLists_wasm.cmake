@@ -1,4 +1,4 @@
-# Emscripten/WASM build for Baudline
+# Emscripten/WASM build for Baudmine
 # Usage:
 #   source ~/emsdk/emsdk_env.sh
 #   emcmake cmake -B build_wasm -C CMakeLists_wasm.cmake

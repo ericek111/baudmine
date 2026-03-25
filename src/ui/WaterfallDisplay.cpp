@@ -3,7 +3,7 @@
 #include <cmath>
 #include <cstring>
 
-namespace baudline {
+namespace baudmine {
 
 WaterfallDisplay::WaterfallDisplay() = default;
 
@@ -160,4 +160,4 @@ void WaterfallDisplay::uploadRow(int row) {
     // Note: no unbind — ImGui will bind its own textures before drawing.
 }
 
-} // namespace baudline
+} // namespace baudmine

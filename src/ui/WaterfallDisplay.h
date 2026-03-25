@@ -6,7 +6,7 @@
 #include <vector>
 #include <deque>
 
-namespace baudline {
+namespace baudmine {
 
 struct WaterfallChannelInfo {
     float r, g, b;
@@ -55,4 +55,4 @@ private:
     std::vector<ActiveCh> activeChBuf_;
 };
 
-} // namespace baudline
+} // namespace baudmine

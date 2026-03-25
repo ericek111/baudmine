@@ -2,7 +2,7 @@
 
 #include <cstddef>
 
-namespace baudline {
+namespace baudmine {
 
 // Abstract audio source.  All sources deliver interleaved float samples.
 // For I/Q data channels()==2: [I0, Q0, I1, Q1, ...].
@@ -24,4 +24,4 @@ public:
     virtual bool   isEOF()      const = 0;
 };
 
-} // namespace baudline
+} // namespace baudmine

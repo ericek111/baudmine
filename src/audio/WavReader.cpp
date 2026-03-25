@@ -2,7 +2,7 @@
 #include <cstring>
 #include <algorithm>
 
-namespace baudline {
+namespace baudmine {
 
 // Read a little-endian uint16/uint32 from raw bytes.
 static uint16_t readU16(const uint8_t* p) { return p[0] | (p[1] << 8); }
@@ -138,4 +138,4 @@ void WavReader::seekFrame(size_t frame) {
     file_.seekg(static_cast<std::streamoff>(byteOffset));
 }
 
-} // namespace baudline
+} // namespace baudmine

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build Baudline for WebAssembly
+# Build Baudmine for WebAssembly
 # Prerequisites: Emscripten SDK installed at ~/emsdk
 set -e
 
@@ -13,6 +13,6 @@ echo "=== Building ==="
 cmake --build build_wasm -j$(nproc)
 
 echo "=== Done ==="
-echo "Output: build_wasm/web/baudline.html"
+echo "Output: build_wasm/web/baudmine.html"
 echo "To test: cd build_wasm/web && python3 -m http.server 8080"
-echo "Then open http://localhost:8080/baudline.html"
+echo "Then open http://localhost:8080/baudmine.html"

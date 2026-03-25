@@ -4,7 +4,7 @@
 #include "ui/SpectrumDisplay.h"
 #include <vector>
 
-namespace baudline {
+namespace baudmine {
 
 struct PeakInfo {
     int    bin  = 0;
@@ -66,4 +66,4 @@ private:
     static double binToFreq(int bin, double sampleRate, bool isIQ, int fftSize);
 };
 
-} // namespace baudline
+} // namespace baudmine

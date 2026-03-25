@@ -16,7 +16,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace baudline {
+namespace baudmine {
 
 Application::Application() = default;
 
@@ -25,7 +25,7 @@ Application::~Application() {
 }
 
 bool Application::init(int argc, char** argv) {
-    // Parse command line: baudline [file] [--format fmt] [--rate sr]
+    // Parse command line: baudmine [file] [--format fmt] [--rate sr]
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--format" && i + 1 < argc) {
@@ -59,7 +59,7 @@ bool Application::init(int argc, char** argv) {
 #endif
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 
-    window_ = SDL_CreateWindow("Baudline Spectrum Analyzer",
+    window_ = SDL_CreateWindow("Baudmine Spectrum Analyzer",
                                SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                1400, 900,
                                SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE |
@@ -1503,4 +1503,4 @@ void Application::saveConfig() const {
     cfg.save();
 }
 
-} // namespace baudline
+} // namespace baudmine

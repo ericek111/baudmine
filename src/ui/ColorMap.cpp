@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace baudline {
+namespace baudmine {
 
 // Interpolation helper for colormaps defined as control points.
 struct ColorStop {
@@ -105,4 +105,4 @@ void ColorMap::buildLUT() {
     }
 }
 
-} // namespace baudline
+} // namespace baudmine

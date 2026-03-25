@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace baudline {
+namespace baudmine {
 
 class WavReader {
 public:
@@ -38,4 +38,4 @@ private:
     std::vector<uint8_t> readBuf_;  // scratch for format conversion
 };
 
-} // namespace baudline
+} // namespace baudmine

@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-namespace baudline {
+namespace baudmine {
 
 // Reads WAV files and raw I/Q files (float32, int16, uint8).
 // Native builds use libsndfile; WASM builds use a built-in WAV reader.
@@ -65,4 +65,4 @@ private:
     size_t        rawFileSize_ = 0;
 };
 
-} // namespace baudline
+} // namespace baudmine

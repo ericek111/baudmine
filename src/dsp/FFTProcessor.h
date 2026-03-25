@@ -5,7 +5,7 @@
 #include <complex>
 #include <vector>
 
-namespace baudline {
+namespace baudmine {
 
 // Wraps FFTW for real->complex and complex->complex transforms.
 // Produces magnitude output in dB and optionally retains the complex spectrum.
@@ -55,4 +55,4 @@ private:
     std::vector<std::complex<float>> scratchCplx_;
 };
 
-} // namespace baudline
+} // namespace baudmine

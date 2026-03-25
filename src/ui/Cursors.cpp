@@ -3,7 +3,7 @@
 #include <cmath>
 #include <algorithm>
 
-namespace baudline {
+namespace baudmine {
 
 static double binToFreqHelper(int bin, double sampleRate, bool isIQ, int fftSize) {
     if (isIQ) {
@@ -194,4 +194,4 @@ int Cursors::findLocalPeak(const std::vector<float>& spectrumDB,
     return best;
 }
 
-} // namespace baudline
+} // namespace baudmine

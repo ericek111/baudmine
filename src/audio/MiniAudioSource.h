@@ -10,7 +10,7 @@
 struct ma_device;
 struct ma_context;
 
-namespace baudline {
+namespace baudmine {
 
 class MiniAudioSource : public AudioSource {
 public:
@@ -50,4 +50,4 @@ private:
     std::unique_ptr<RingBuffer<float>> ringBuf_;
 };
 
-} // namespace baudline
+} // namespace baudmine

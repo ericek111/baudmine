@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace baudline {
+namespace baudmine {
 
 // ── FFT configuration ────────────────────────────────────────────────────────
 
@@ -157,4 +157,4 @@ struct Color3 {
     uint8_t r, g, b;
 };
 
-} // namespace baudline
+} // namespace baudmine

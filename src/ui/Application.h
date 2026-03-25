@@ -17,7 +17,7 @@
 #include <string>
 #include <vector>
 
-namespace baudline {
+namespace baudmine {
 
 // ── Channel math operations ──────────────────────────────────────────────────
 
@@ -203,4 +203,4 @@ private:
     std::vector<ChannelStyle>        stylesScratch_;
 };
 
-} // namespace baudline
+} // namespace baudmine

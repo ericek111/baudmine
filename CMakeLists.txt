@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(baudline VERSION 1.0.0 LANGUAGES C CXX)
+project(baudmine VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -145,12 +145,12 @@ if(EMSCRIPTEN)
     target_compile_options(imgui PUBLIC -sUSE_SDL=2)
     target_link_options(imgui PUBLIC -sUSE_SDL=2)
 
-    add_executable(baudline ${SOURCES})
-    target_include_directories(baudline PRIVATE src)
-    target_link_libraries(baudline PRIVATE imgui fftw3f_wasm)
+    add_executable(baudmine ${SOURCES})
+    target_include_directories(baudmine PRIVATE src)
+    target_link_libraries(baudmine PRIVATE imgui fftw3f_wasm)
 
     # Emscripten linker flags
-    target_link_options(baudline PRIVATE
+    target_link_options(baudmine PRIVATE
         -sUSE_SDL=2
         -sALLOW_MEMORY_GROWTH=1
         -sINITIAL_MEMORY=67108864
@@ -161,8 +161,8 @@ if(EMSCRIPTEN)
         --shell-file=${CMAKE_SOURCE_DIR}/web/shell.html
     )
 
-    # Output baudline.html + .js + .wasm
-    set_target_properties(baudline PROPERTIES
+    # Output baudmine.html + .js + .wasm
+    set_target_properties(baudmine PROPERTIES
         SUFFIX ".html"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/web"
     )
@@ -185,9 +185,9 @@ else()
 
     target_link_libraries(imgui PUBLIC PkgConfig::SDL2 OpenGL::GL)
 
-    add_executable(baudline ${SOURCES})
-    target_include_directories(baudline PRIVATE src)
-    target_link_libraries(baudline PRIVATE
+    add_executable(baudmine ${SOURCES})
+    target_include_directories(baudmine PRIVATE src)
+    target_link_libraries(baudmine PRIVATE
         imgui
         PkgConfig::SDL2
         PkgConfig::FFTW3F
@@ -198,7 +198,7 @@ else()
 
     # Link math library and dl on Unix (dl needed by miniaudio for backend loading)
     if(UNIX)
-        target_link_libraries(baudline PRIVATE m dl)
+        target_link_libraries(baudmine PRIVATE m dl)
     endif()
 
 endif()

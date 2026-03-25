@@ -7,7 +7,7 @@
 #include <deque>
 #include <vector>
 
-namespace baudline {
+namespace baudmine {
 
 class SpectrumAnalyzer {
 public:
@@ -70,4 +70,4 @@ private:
     float               windowCorrection_ = 0.0f;
 };
 
-} // namespace baudline
+} // namespace baudmine

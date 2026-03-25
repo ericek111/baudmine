@@ -3,11 +3,11 @@
 
 #ifdef __EMSCRIPTEN__
 // Keep app alive for the Emscripten main loop.
-static baudline::Application* g_app = nullptr;
+static baudmine::Application* g_app = nullptr;
 #endif
 
 int main(int argc, char** argv) {
-    static baudline::Application app;
+    static baudmine::Application app;
 
     if (!app.init(argc, argv)) {
         std::fprintf(stderr, "Failed to initialize application\n");

@@ -2,7 +2,7 @@
 #include <cstdio>
 #include <cstring>
 
-namespace baudline {
+namespace baudmine {
 
 static bool sPaInitialized = false;
 
@@ -111,4 +111,4 @@ std::vector<PortAudioSource::DeviceInfo> PortAudioSource::listInputDevices() {
     return devices;
 }
 
-} // namespace baudline
+} // namespace baudmine

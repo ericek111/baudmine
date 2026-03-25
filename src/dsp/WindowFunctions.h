@@ -3,7 +3,7 @@
 #include "core/Types.h"
 #include <vector>
 
-namespace baudline {
+namespace baudmine {
 
 class WindowFunctions {
 public:
@@ -29,4 +29,4 @@ private:
     static double besselI0(double x);
 };
 
-} // namespace baudline
+} // namespace baudmine

@@ -3,10 +3,10 @@
 #include <string>
 #include <unordered_map>
 
-namespace baudline {
+namespace baudmine {
 
 // Simple INI-style config: key = value, one per line. Lines starting with # are
-// comments.  No sections.  Stored at ~/.config/baudline/settings.ini.
+// comments.  No sections.  Stored at ~/.config/baudmine/settings.ini.
 class Config {
 public:
     static std::string defaultPath();
@@ -29,4 +29,4 @@ private:
     std::string resolvedPath(const std::string& path) const;
 };
 
-} // namespace baudline
+} // namespace baudmine

@@ -3,7 +3,7 @@
 #include <cmath>
 #include <cstring>
 
-namespace baudline {
+namespace baudmine {
 
 SpectrumAnalyzer::SpectrumAnalyzer() {
     settings_.fftSize = 0;
@@ -137,4 +137,4 @@ void SpectrumAnalyzer::clearHistory() {
     newSpectrumReady_ = false;
 }
 
-} // namespace baudline
+} // namespace baudmine

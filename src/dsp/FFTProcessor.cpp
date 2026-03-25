@@ -2,7 +2,7 @@
 #include <cmath>
 #include <algorithm>
 
-namespace baudline {
+namespace baudmine {
 
 FFTProcessor::FFTProcessor() = default;
 
@@ -94,4 +94,4 @@ void FFTProcessor::processComplex(const float* inputIQ, std::vector<float>& outp
     processComplex(inputIQ, outputDB, scratchCplx_);
 }
 
-} // namespace baudline
+} // namespace baudmine

@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <cstring>
 
-namespace baudline {
+namespace baudmine {
 
 FileSource::FileSource(const std::string& path, InputFormat format,
                        double sampleRate, bool loop)
@@ -178,4 +178,4 @@ size_t FileSource::readRawUint8(float* buffer, size_t frames) {
     return samplesRead / 2;
 }
 
-} // namespace baudline
+} // namespace baudmine

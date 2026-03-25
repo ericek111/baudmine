@@ -2,7 +2,7 @@
 #include <cmath>
 #include <algorithm>
 
-namespace baudline {
+namespace baudmine {
 
 static float freqToLogFrac(double freq, double minFreq, double maxFreq) {
     if (freq <= 0 || minFreq <= 0) return 0.0f;
@@ -296,4 +296,4 @@ void SpectrumDisplay::clearPeakHold() {
     peakHold_.clear();
 }
 
-} // namespace baudline
+} // namespace baudmine

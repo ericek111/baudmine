@@ -5,7 +5,7 @@
 #include <cstring>
 #include <vector>
 
-namespace baudline {
+namespace baudmine {
 
 // Single-producer single-consumer lock-free ring buffer for audio data.
 // Producer: audio callback thread.  Consumer: main/render thread.
@@ -97,4 +97,4 @@ private:
     alignas(64) std::atomic<size_t> readPos_{0};
 };
 
-} // namespace baudline
+} // namespace baudmine

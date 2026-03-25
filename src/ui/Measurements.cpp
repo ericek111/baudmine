@@ -4,7 +4,7 @@
 #include <cmath>
 #include <cstdio>
 
-namespace baudline {
+namespace baudmine {
 
 double Measurements::binToFreq(int bin, double sampleRate, bool isIQ, int fftSize) {
     // Use bin center (+0.5) for more accurate frequency estimation.
@@ -301,4 +301,4 @@ void Measurements::drawPanel() {
     }
 }
 
-} // namespace baudline
+} // namespace baudmine

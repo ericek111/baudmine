@@ -4,7 +4,7 @@
 #include <imgui.h>
 #include <vector>
 
-namespace baudline {
+namespace baudmine {
 
 struct ChannelStyle {
     ImU32 lineColor;
@@ -54,4 +54,4 @@ private:
     mutable std::vector<std::vector<float>> peakHold_;
 };
 
-} // namespace baudline
+} // namespace baudmine

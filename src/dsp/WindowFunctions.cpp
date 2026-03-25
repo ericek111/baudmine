@@ -2,7 +2,7 @@
 #include <cmath>
 #include <numeric>
 
-namespace baudline {
+namespace baudmine {
 
 static constexpr double kPi = 3.14159265358979323846;
 
@@ -97,4 +97,4 @@ double WindowFunctions::besselI0(double x) {
     return sum;
 }
 
-} // namespace baudline
+} // namespace baudmine

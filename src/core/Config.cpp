@@ -9,7 +9,7 @@
 // ── WASM: persist settings via browser localStorage ─────────────────────────
 
 EM_JS(char*, js_loadSettings, (), {
-    var s = localStorage.getItem("baudline_settings");
+    var s = localStorage.getItem("baudmine_settings");
     if (!s) return 0;
     var len = lengthBytesUTF8(s) + 1;
     var buf = _malloc(len);
@@ -18,14 +18,14 @@ EM_JS(char*, js_loadSettings, (), {
 });
 
 EM_JS(void, js_saveSettings, (const char* data), {
-    localStorage.setItem("baudline_settings", UTF8ToString(data));
+    localStorage.setItem("baudmine_settings", UTF8ToString(data));
 });
 
 #else
 #include <sys/stat.h>
 #endif
 
-namespace baudline {
+namespace baudmine {
 
 std::string Config::defaultPath() {
 #ifdef __EMSCRIPTEN__
@@ -39,7 +39,7 @@ std::string Config::defaultPath() {
         const char* home = std::getenv("HOME");
         base = home ? std::string(home) + "/.config" : ".";
     }
-    return base + "/baudline/settings.ini";
+    return base + "/baudmine/settings.ini";
 #endif
 }
 
@@ -96,7 +96,7 @@ static void ensureDir(const std::string& path) {
 bool Config::save(const std::string& path) const {
 #ifdef __EMSCRIPTEN__
     std::ostringstream f;
-    f << "# Baudline settings\n";
+    f << "# Baudmine settings\n";
     for (const auto& [k, v] : data_)
         f << k << " = " << v << "\n";
     js_saveSettings(f.str().c_str());
@@ -107,7 +107,7 @@ bool Config::save(const std::string& path) const {
     std::ofstream f(p);
     if (!f.is_open()) return false;
 
-    f << "# Baudline settings\n";
+    f << "# Baudmine settings\n";
     for (const auto& [k, v] : data_)
         f << k << " = " << v << "\n";
     return true;
@@ -146,4 +146,4 @@ bool Config::getBool(const std::string& key, bool def) const {
     return it->second == "1" || it->second == "true";
 }
 
-} // namespace baudline
+} // namespace baudmine

@@ -3,7 +3,7 @@
 #include "core/Types.h"
 #include <vector>
 
-namespace baudline {
+namespace baudmine {
 
 class ColorMap {
 public:
@@ -28,4 +28,4 @@ private:
     std::vector<Color3> lut_;  // 256 entries
 };
 
-} // namespace baudline
+} // namespace baudmine

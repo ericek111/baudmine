@@ -6,7 +6,7 @@
 #include <memory>
 #include <string>
 
-namespace baudline {
+namespace baudmine {
 
 class PortAudioSource : public AudioSource {
 public:
@@ -51,4 +51,4 @@ private:
     std::unique_ptr<RingBuffer<float>> ringBuf_;
 };
 
-} // namespace baudline
+} // namespace baudmine

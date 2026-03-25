@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <cstring>
 
-namespace baudline {
+namespace baudmine {
 
 // ── Shared context (lazy-initialized) ────────────────────────────────────────
 
@@ -166,4 +166,4 @@ size_t MiniAudioSource::read(float* buffer, size_t frames) {
     return ringBuf_->read(buffer, frames * channels_) / channels_;
 }
 
-} // namespace baudline
+} // namespace baudmine
