@@ -2,11 +2,35 @@
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
+
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+
+// ── WASM: persist settings via browser localStorage ─────────────────────────
+
+EM_JS(char*, js_loadSettings, (), {
+    var s = localStorage.getItem("baudline_settings");
+    if (!s) return 0;
+    var len = lengthBytesUTF8(s) + 1;
+    var buf = _malloc(len);
+    stringToUTF8(s, buf, len);
+    return buf;
+});
+
+EM_JS(void, js_saveSettings, (const char* data), {
+    localStorage.setItem("baudline_settings", UTF8ToString(data));
+});
+
+#else
 #include <sys/stat.h>
+#endif
 
 namespace baudline {
 
 std::string Config::defaultPath() {
+#ifdef __EMSCRIPTEN__
+    return "";
+#else
     const char* xdg = std::getenv("XDG_CONFIG_HOME");
     std::string base;
     if (xdg && xdg[0]) {
@@ -16,6 +40,7 @@ std::string Config::defaultPath() {
         base = home ? std::string(home) + "/.config" : ".";
     }
     return base + "/baudline/settings.ini";
+#endif
 }
 
 std::string Config::resolvedPath(const std::string& path) const {
@@ -23,8 +48,16 @@ std::string Config::resolvedPath(const std::string& path) const {
 }
 
 bool Config::load(const std::string& path) {
+#ifdef __EMSCRIPTEN__
+    char* raw = js_loadSettings();
+    if (!raw) return false;
+    std::string content(raw);
+    free(raw);
+    std::istringstream f(content);
+#else
     std::ifstream f(resolvedPath(path));
     if (!f.is_open()) return false;
+#endif
 
     data_.clear();
     std::string line;
@@ -42,6 +75,7 @@ bool Config::load(const std::string& path) {
     return true;
 }
 
+#ifndef __EMSCRIPTEN__
 static void ensureDir(const std::string& path) {
     // Create parent directories.
     auto lastSlash = path.rfind('/');
@@ -57,8 +91,17 @@ static void ensureDir(const std::string& path) {
     }
     mkdir(dir.c_str(), 0755);
 }
+#endif
 
 bool Config::save(const std::string& path) const {
+#ifdef __EMSCRIPTEN__
+    std::ostringstream f;
+    f << "# Baudline settings\n";
+    for (const auto& [k, v] : data_)
+        f << k << " = " << v << "\n";
+    js_saveSettings(f.str().c_str());
+    return true;
+#else
     std::string p = resolvedPath(path);
     ensureDir(p);
     std::ofstream f(p);
@@ -68,6 +111,7 @@ bool Config::save(const std::string& path) const {
     for (const auto& [k, v] : data_)
         f << k << " = " << v << "\n";
     return true;
+#endif
 }
 
 void Config::setString(const std::string& key, const std::string& value) { data_[key] = value; }

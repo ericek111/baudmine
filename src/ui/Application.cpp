@@ -1414,9 +1414,6 @@ void Application::renderMathPanel() {
 }
 
 void Application::loadConfig() {
-#ifdef __EMSCRIPTEN__
-    return;  // No filesystem config on WASM
-#endif
     config_.load();
     fftSizeIdx_   = config_.getInt("fft_size_idx", fftSizeIdx_);
     overlapPct_   = config_.getFloat("overlap_pct", overlapPct_);
@@ -1458,9 +1455,6 @@ void Application::loadConfig() {
 }
 
 void Application::saveConfig() const {
-#ifdef __EMSCRIPTEN__
-    return;
-#endif
     Config cfg;
     cfg.setInt("fft_size_idx", fftSizeIdx_);
     cfg.setFloat("overlap_pct", overlapPct_);
