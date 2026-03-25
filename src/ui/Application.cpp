@@ -212,6 +212,8 @@ void Application::processAudio() {
             int curCh = std::clamp(waterfallChannel_, 0, nSpec - 1);
             cursors_.update(analyzer_.channelSpectrum(curCh),
                            settings_.sampleRate, settings_.isIQ, settings_.fftSize);
+            measurements_.update(analyzer_.channelSpectrum(curCh),
+                                 settings_.sampleRate, settings_.isIQ, settings_.fftSize);
             ++spectraThisFrame;
         }
     }
@@ -640,6 +642,24 @@ void Application::renderControlPanel() {
         cursors_.drawPanel();
     }
 
+    // ── Measurements ──
+    ImGui::Spacing();
+    {
+        bool headerOpen = ImGui::CollapsingHeader("##meas_hdr",
+                                                   ImGuiTreeNodeFlags_AllowOverlap);
+        ImGui::SameLine();
+        ImGui::Text("Measurements");
+        ImGui::SameLine();
+        ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x
+                             - ImGui::GetFrameHeight());
+        ImGui::Checkbox("##meas_en", &measurements_.enabled);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Enable measurements");
+
+        if (headerOpen) {
+            measurements_.drawPanel();
+        }
+    }
+
     // ── Status (bottom) ──
     ImGui::Separator();
     ImGui::TextDisabled("Mode: %s", settings_.isIQ ? "I/Q"
@@ -705,6 +725,10 @@ void Application::renderSpectrumPanel() {
     cursors_.draw(specDisplay_, specPosX_, specPosY_, specSizeX_, specSizeY_,
                   settings_.sampleRate, settings_.isIQ, freqScale_, minDB_, maxDB_,
                   viewLo_, viewHi_);
+
+    measurements_.draw(specDisplay_, specPosX_, specPosY_, specSizeX_, specSizeY_,
+                       settings_.sampleRate, settings_.isIQ, freqScale_, minDB_, maxDB_,
+                       viewLo_, viewHi_);
 
     handleSpectrumInput(specPosX_, specPosY_, specSizeX_, specSizeY_);
 
@@ -842,6 +866,10 @@ void Application::renderWaterfallPanel() {
 
         // Store waterfall geometry for cross-panel cursor drawing.
         wfPosX_ = pos.x; wfPosY_ = pos.y; wfSizeX_ = availW; wfSizeY_ = availH;
+
+        measurements_.drawWaterfall(specDisplay_, wfPosX_, wfPosY_, wfSizeX_, wfSizeY_,
+                                     settings_.sampleRate, settings_.isIQ, freqScale_,
+                                     viewLo_, viewHi_);
 
         // ── Mouse interaction: zoom, pan & hover on waterfall ──
         ImGuiIO& io = ImGui::GetIO();

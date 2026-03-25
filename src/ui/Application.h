@@ -9,6 +9,7 @@
 #include "ui/WaterfallDisplay.h"
 #include "ui/SpectrumDisplay.h"
 #include "ui/Cursors.h"
+#include "ui/Measurements.h"
 
 #include <SDL.h>
 #include <complex>
@@ -111,6 +112,7 @@ private:
     WaterfallDisplay  waterfall_;
     SpectrumDisplay   specDisplay_;
     Cursors           cursors_;
+    Measurements      measurements_;
 
     // Display settings
     float     minDB_       = -120.0f;

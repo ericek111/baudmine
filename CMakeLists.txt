@@ -61,6 +61,7 @@ set(SOURCES
     src/ui/WaterfallDisplay.cpp
     src/ui/SpectrumDisplay.cpp
     src/ui/Cursors.cpp
+    src/ui/Measurements.cpp
     src/ui/Application.cpp
 )
 
