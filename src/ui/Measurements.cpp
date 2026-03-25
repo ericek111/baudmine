@@ -70,6 +70,14 @@ void Measurements::update(const std::vector<float>& spectrumDB,
         globalPeak_.bin = bin;
         globalPeak_.dB = *it;
         globalPeak_.freq = binToFreq(bin, sampleRate, isIQ, fftSize);
+
+        // Push into peak history circular buffer
+        constexpr int kMaxHistory = 4096;
+        if (static_cast<int>(peakHistBins_.size()) < kMaxHistory)
+            peakHistBins_.resize(kMaxHistory, -1);
+        peakHistIdx_ = (peakHistIdx_ + 1) % kMaxHistory;
+        peakHistBins_[peakHistIdx_] = bin;
+        if (peakHistLen_ < kMaxHistory) ++peakHistLen_;
     }
 
     if (!enabled) { peaks_.clear(); return; }
@@ -154,28 +162,66 @@ void Measurements::draw(const SpectrumDisplay& specDisplay,
 void Measurements::drawWaterfall(const SpectrumDisplay& specDisplay,
                                   float posX, float posY, float sizeX, float sizeY,
                                   double sampleRate, bool isIQ, FreqScale freqScale,
-                                  float viewLo, float viewHi) const {
-    if (!enabled || !showOnWaterfall || peaks_.empty()) return;
-
+                                  float viewLo, float viewHi,
+                                  int screenRows, int spectrumSize) const {
     ImDrawList* dl = ImGui::GetWindowDrawList();
 
-    auto peakColor = [](int idx) -> ImU32 {
-        if (idx == 0) return IM_COL32(255, 80, 80, 120);
-        return IM_COL32(255, 140, 60, 80);
-    };
+    // Peak trace: red squiggly line showing peak frequency history
+    if (showPeakTrace && peakHistLen_ > 1 && screenRows > 1 && spectrumSize > 0) {
+        int histSize = static_cast<int>(peakHistBins_.size());
+        int count = std::min(screenRows, peakHistLen_);
+        ImU32 traceCol = IM_COL32(255, 30, 30, 200);
 
-    for (int i = 0; i < static_cast<int>(peaks_.size()); ++i) {
-        const auto& p = peaks_[i];
-        float x = specDisplay.freqToScreenX(p.freq, posX, sizeX,
-                                             sampleRate, isIQ, freqScale,
-                                             viewLo, viewHi);
-        ImU32 col = peakColor(i);
-        float thickness = (i == 0) ? 1.5f : 1.0f;
-        dl->AddLine({x, posY}, {x, posY + sizeY}, col, thickness);
+        // Convert bin index to screen X via normalized frequency fraction
+        auto binToX = [&](int bin) -> float {
+            float frac = (static_cast<float>(bin) + 0.5f) / spectrumSize;
+            // Map through view range
+            float viewFrac = (frac - viewLo) / (viewHi - viewLo);
+            return posX + viewFrac * sizeX;
+        };
+
+        // Walk from newest (bottom) to oldest (top)
+        float prevX = 0, prevY = 0;
+        bool havePrev = false;
+        for (int i = 0; i < count; ++i) {
+            int idx = (peakHistIdx_ - i + histSize) % histSize;
+            int bin = peakHistBins_[idx];
+            if (bin < 0) break;
+
+            // Y: i=0 is newest (bottom), i=count-1 is oldest (top)
+            float y = posY + sizeY - (static_cast<float>(i) + 0.5f) / screenRows * sizeY;
+            float x = binToX(bin);
+
+            if (havePrev) {
+                dl->AddLine({prevX, prevY}, {x, y}, traceCol, 3.0f);
+            }
+            prevX = x;
+            prevY = y;
+            havePrev = true;
+        }
+    }
+
+    // Vertical markers at current peak positions
+    if (enabled && showOnWaterfall && !peaks_.empty()) {
+        auto peakColor = [](int idx) -> ImU32 {
+            if (idx == 0) return IM_COL32(255, 80, 80, 120);
+            return IM_COL32(255, 140, 60, 80);
+        };
+
+        for (int i = 0; i < static_cast<int>(peaks_.size()); ++i) {
+            const auto& p = peaks_[i];
+            float x = specDisplay.freqToScreenX(p.freq, posX, sizeX,
+                                                 sampleRate, isIQ, freqScale,
+                                                 viewLo, viewHi);
+            ImU32 col = peakColor(i);
+            float thickness = (i == 0) ? 1.5f : 1.0f;
+            dl->AddLine({x, posY}, {x, posY + sizeY}, col, thickness);
+        }
     }
 }
 
 void Measurements::drawPanel() {
+    ImGui::Checkbox("Peak trace", &showPeakTrace);
     if (!enabled) return;
 
     ImGui::SetNextItemWidth(-1);

@@ -994,7 +994,7 @@ void Application::renderWaterfallPanel() {
 
         measurements_.drawWaterfall(specDisplay_, wfPosX_, wfPosY_, wfSizeX_, wfSizeY_,
                                      settings_.sampleRate, settings_.isIQ, freqScale_,
-                                     viewLo_, viewHi_);
+                                     viewLo_, viewHi_, screenRows, analyzer_.spectrumSize());
 
         // ── Mouse interaction: zoom, pan & hover on waterfall ──
         ImGuiIO& io = ImGui::GetIO();

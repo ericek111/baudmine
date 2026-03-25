@@ -25,11 +25,12 @@ public:
               float minDB, float maxDB,
               float viewLo, float viewHi) const;
 
-    // Draw vertical markers on the waterfall panel.
+    // Draw vertical markers and peak trace on the waterfall panel.
     void drawWaterfall(const SpectrumDisplay& specDisplay,
                        float posX, float posY, float sizeX, float sizeY,
                        double sampleRate, bool isIQ, FreqScale freqScale,
-                       float viewLo, float viewHi) const;
+                       float viewLo, float viewHi,
+                       int screenRows, int spectrumSize) const;
 
     // Draw sidebar panel (ImGui widgets).
     void drawPanel();
@@ -44,10 +45,16 @@ public:
     float peakThreshold = -120.0f; // ignore peaks below this dB
     bool showOnSpectrum = true;   // draw markers on spectrum
     bool showOnWaterfall = false; // draw vertical lines on waterfall
+    bool showPeakTrace  = false;  // draw peak history curve on waterfall
 
 private:
     PeakInfo globalPeak_;             // always-tracked highest peak
     std::vector<PeakInfo> peaks_;
+
+    // Peak history for waterfall trace (circular buffer, newest at peakHistIdx_)
+    std::vector<int> peakHistBins_;   // bin index per waterfall line
+    int              peakHistIdx_ = 0;
+    int              peakHistLen_ = 0; // how many entries are valid
 
     // Find top-N peaks with minimum bin separation.
     void findPeaks(const std::vector<float>& spectrumDB, int maxN,
