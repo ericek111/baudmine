@@ -478,48 +478,21 @@ void Application::render() {
                 double binCenterFreq = fMin + (static_cast<double>(cursors_.hover.bin) + 0.5)
                                        / bins * (fMax - fMin);
 
-                // Fixed-width frequency string to prevent jumping
-                char freqBuf[48];
-                if (std::abs(binCenterFreq) >= 1e6)
-                    std::snprintf(freqBuf, sizeof(freqBuf), "%12.6f MHz", binCenterFreq / 1e6);
-                else if (std::abs(binCenterFreq) >= 1e3)
-                    std::snprintf(freqBuf, sizeof(freqBuf), "%9.3f kHz", binCenterFreq / 1e3);
-                else
-                    std::snprintf(freqBuf, sizeof(freqBuf), "%7.1f Hz", binCenterFreq);
-
-                char valBuf[48];
+                char hoverBuf[128];
                 if (hoverPanel_ == HoverPanel::Spectrum) {
-                    std::snprintf(valBuf, sizeof(valBuf), "%7.1f dB", cursors_.hover.dB);
+                    fmtFreqDB(hoverBuf, sizeof(hoverBuf), "", binCenterFreq, cursors_.hover.dB);
                 } else if (hoverPanel_ == HoverPanel::Waterfall) {
-                    if (hoverWfTimeOffset_ >= 10.0f)
-                        std::snprintf(valBuf, sizeof(valBuf), "%7.1f s", -hoverWfTimeOffset_);
-                    else if (hoverWfTimeOffset_ >= 1.0f)
-                        std::snprintf(valBuf, sizeof(valBuf), "%7.2f s", -hoverWfTimeOffset_);
-                    else
-                        std::snprintf(valBuf, sizeof(valBuf), "%5.0f ms", -hoverWfTimeOffset_ * 1000.0f);
+                    fmtFreqTime(hoverBuf, sizeof(hoverBuf), "", binCenterFreq, -hoverWfTimeOffset_);
                 } else {
-                    valBuf[0] = '\0';
+                    fmtFreq(hoverBuf, sizeof(hoverBuf), binCenterFreq);
                 }
 
-                // Draw as a single right-aligned line, fixed-width value column
+                // Right-align the text
                 ImU32 hoverTextCol = IM_COL32(100, 230, 130, 240);
                 float rightEdge = specPosX_ + specSizeX_ - 8;
                 float hy2 = specPosY_ + 4;
-
-                // Use a fixed-width reference for the value column to prevent jumping
-                ImVec2 refSz = ImGui::CalcTextSize("-000.0 dB");
-                ImVec2 freqSz = ImGui::CalcTextSize(freqBuf);
-                float sepW = ImGui::CalcTextSize("  ").x;
-                float valColX = rightEdge - refSz.x;
-                float freqX = valColX - sepW - freqSz.x;
-
-                if (valBuf[0]) {
-                    ImVec2 valSz = ImGui::CalcTextSize(valBuf);
-                    dlp->AddText({freqX, hy2}, hoverTextCol, freqBuf);
-                    dlp->AddText({rightEdge - valSz.x, hy2}, hoverTextCol, valBuf);
-                } else {
-                    dlp->AddText({rightEdge - freqSz.x, hy2}, hoverTextCol, freqBuf);
-                }
+                ImVec2 hSz = ImGui::CalcTextSize(hoverBuf);
+                dlp->AddText({rightEdge - hSz.x, hy2}, hoverTextCol, hoverBuf);
             }
         }
     }

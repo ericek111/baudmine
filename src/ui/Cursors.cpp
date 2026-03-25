@@ -97,7 +97,8 @@ void Cursors::draw(const SpectrumDisplay& specDisplay,
         formatLabel(buf, sizeof(buf), label, c.freq, dispDB);
         ImVec2 sz = ImGui::CalcTextSize(buf);
         float lineH = ImGui::GetTextLineHeight();
-        float ty = posY + 4 + row * (lineH + 4);
+        // draw starting from the second line -- on the first line, we have cursor data
+        float ty = posY + 4 + (row + 1) * (lineH + 4);
 
         // Place right of cursor line; flip left if it would overflow.
         float tx;
@@ -118,25 +119,15 @@ void Cursors::draw(const SpectrumDisplay& specDisplay,
     if (showDelta && cursorA.active && cursorB.active) {
         double dFreq = cursorB.freq - cursorA.freq;
         float dDB = bDB - aDB;
-        char val1[48], val2[48];
-        fmtFreq(val1, sizeof(val1), dFreq);
-        std::snprintf(val2, sizeof(val2), "%.1f dB", dDB);
+        char deltaBuf[128];
+        fmtFreqDB(deltaBuf, sizeof(deltaBuf), "D", dFreq, dDB);
 
-        ImVec2 labelSz = ImGui::CalcTextSize("dF = ");
-        ImVec2 v1Sz = ImGui::CalcTextSize(val1);
-        ImVec2 v2Sz = ImGui::CalcTextSize(val2);
-        float valW = std::max(v1Sz.x, v2Sz.x);
-        float lineH = labelSz.y;
-        float totalW = labelSz.x + valW;
-        float tx = posX + sizeX - totalW - 158;
+        ImVec2 dSz = ImGui::CalcTextSize(deltaBuf);
+        float tx = posX + sizeX - dSz.x - 178;
+        float lineH = ImGui::GetTextLineHeight();
         float ty = posY + 4;
         ImU32 col = IM_COL32(255, 200, 100, 255);
-        float eqX = tx + labelSz.x;  // values start here (right of '= ')
-
-        dl->AddText({tx, ty}, col, "dF =");
-        dl->AddText({eqX + valW - v1Sz.x, ty}, col, val1);
-        dl->AddText({tx, ty + lineH + 2}, col, "dA =");
-        dl->AddText({eqX + valW - v2Sz.x, ty + lineH + 2}, col, val2);
+        dl->AddText({tx, ty}, col, deltaBuf);
     }
 
     // (Hover cursor line is drawn cross-panel by Application.)

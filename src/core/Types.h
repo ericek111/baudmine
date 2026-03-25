@@ -99,14 +99,33 @@ inline int fmtFreq(char* buf, size_t sz, double freq) {
         return std::snprintf(buf, sz, "% 7.1f Hz", freq);
 }
 
-// Format "label: freq, dB" into buf for sidebar display (fixed-width freq + dB).
+// Format "label: freq dB" into buf for sidebar display (fixed-width freq + dB).
+// If label is null or empty, omits the "label: " prefix.
 inline int fmtFreqDB(char* buf, size_t sz, const char* label, double freq, float dB) {
+    int off = 0;
+    if (label && label[0])
+        off = std::snprintf(buf, sz, "%s: ", label);
     if (std::abs(freq) >= 1e6)
-        return std::snprintf(buf, sz, "%s: % 10.6f MHz %6.1f dB", label, freq / 1e6, dB);
+        off += std::snprintf(buf + off, sz - off, "% 10.6f MHz %6.1f dB", freq / 1e6, dB);
     else if (std::abs(freq) >= 1e3)
-        return std::snprintf(buf, sz, "%s: % 7.3f kHz %6.1f dB", label, freq / 1e3, dB);
+        off += std::snprintf(buf + off, sz - off, "% 7.3f kHz %6.1f dB", freq / 1e3, dB);
     else
-        return std::snprintf(buf, sz, "%s:  % 7.1f Hz %6.1f dB", label, freq, dB);
+        off += std::snprintf(buf + off, sz - off, " % 7.1f Hz %6.1f dB", freq, dB);
+    return off;
+}
+
+// Format "label: freq, time" into buf for sidebar/overlay display (fixed-width).
+inline int fmtFreqTime(char* buf, size_t sz, const char* label, double freq, float seconds) {
+    int off = 0;
+    if (label && label[0])
+        off = std::snprintf(buf, sz, "%s: ", label);
+    if (std::abs(freq) >= 1e6)
+        off += std::snprintf(buf + off, sz - off, "% 10.6f MHz %7.2f s", freq / 1e6, seconds);
+    else if (std::abs(freq) >= 1e3)
+        off += std::snprintf(buf + off, sz - off, "% 7.3f kHz %7.2f s", freq / 1e3, seconds);
+    else
+        off += std::snprintf(buf + off, sz - off, " % 7.1f Hz %7.2f s", freq, seconds);
+    return off;
 }
 
 // ── Spectrum data ────────────────────────────────────────────────────────────
