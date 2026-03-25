@@ -150,8 +150,8 @@ private:
 
     // Channel colors (up to kMaxChannels).  Defaults: L=purple, R=green.
     ImVec4 channelColors_[kMaxChannels] = {
-        {0.70f, 0.30f, 1.00f, 1.0f},  // purple
         {0.20f, 0.90f, 0.30f, 1.0f},  // green
+        {0.70f, 0.30f, 1.00f, 1.0f},  // purple
         {1.00f, 0.55f, 0.00f, 1.0f},  // orange
         {0.00f, 0.75f, 1.00f, 1.0f},  // cyan
         {1.00f, 0.25f, 0.25f, 1.0f},  // red
