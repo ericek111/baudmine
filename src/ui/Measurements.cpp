@@ -191,12 +191,14 @@ void Measurements::drawWaterfall(const SpectrumDisplay& specDisplay,
         int count = std::min(screenRows, peakHistLen_);
         ImU32 traceCol = IM_COL32(255, 30, 30, 200);
 
-        // Convert bin index to screen X via normalized frequency fraction
+        // Convert bin index to screen X (respects log scale)
+        double fMin = isIQ ? -sampleRate / 2.0 : 0.0;
+        double fMax = isIQ ?  sampleRate / 2.0 : sampleRate / 2.0;
         auto binToX = [&](int bin) -> float {
-            float frac = (static_cast<float>(bin) + 0.5f) / spectrumSize;
-            // Map through view range
-            float viewFrac = (frac - viewLo) / (viewHi - viewLo);
-            return posX + viewFrac * sizeX;
+            double freq = fMin + (static_cast<double>(bin) + 0.5) / spectrumSize * (fMax - fMin);
+            return specDisplay.freqToScreenX(freq, posX, sizeX,
+                                              sampleRate, isIQ, freqScale,
+                                              viewLo, viewHi);
         };
 
         // Walk from newest (bottom) to oldest (top)
