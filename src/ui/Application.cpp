@@ -375,14 +375,12 @@ void Application::render() {
         ImGui::SameLine();
     }
 
-    // Spectrum + Waterfall with draggable splitter
+    // Waterfall (top) + Spectrum (bottom) with draggable splitter
     ImGui::BeginChild("Display", {contentW, contentH}, false);
     {
         constexpr float kSplitterH = 6.0f;
-        float specH  = contentH * spectrumFrac_;
-        float waterfH = contentH - specH - kSplitterH;
 
-        renderSpectrumPanel();
+        renderWaterfallPanel();
 
         // ── Draggable splitter bar ──
         ImVec2 splPos = ImGui::GetCursorScreenPos();
@@ -395,7 +393,8 @@ void Application::render() {
 
         if (active) {
             float dy = ImGui::GetIO().MouseDelta.y;
-            spectrumFrac_ += dy / contentH;
+            // Dragging down = more waterfall = less spectrum
+            spectrumFrac_ -= dy / contentH;
             spectrumFrac_ = std::clamp(spectrumFrac_, 0.1f, 0.9f);
             draggingSplit_ = true;
         } else if (draggingSplit_) {
@@ -411,7 +410,7 @@ void Application::render() {
         float cy = splPos.y + kSplitterH * 0.5f;
         dl->AddLine({splPos.x, cy}, {splPos.x + contentW, cy}, splCol, 2.0f);
 
-        renderWaterfallPanel();
+        renderSpectrumPanel();
 
         // ── Cross-panel hover line & frequency label ──
         if (cursors_.hover.active && specSizeX_ > 0 && wfSizeX_ > 0) {
@@ -421,10 +420,10 @@ void Application::render() {
                            settings_.isIQ, freqScale_, viewLo_, viewHi_);
             ImU32 hoverCol = IM_COL32(200, 200, 200, 80);
 
-            // Line spanning spectrum + splitter + waterfall
-            dlp->AddLine({hx, specPosY_}, {hx, wfPosY_ + wfSizeY_}, hoverCol, 1.0f);
+            // Line spanning waterfall + splitter + spectrum
+            dlp->AddLine({hx, wfPosY_}, {hx, specPosY_ + specSizeY_}, hoverCol, 1.0f);
 
-            // Frequency label at top of the line
+            // Frequency label at top of waterfall
             char freqLabel[48];
             double hf = cursors_.hover.freq;
             if (std::abs(hf) >= 1e6)
@@ -435,8 +434,8 @@ void Application::render() {
                 std::snprintf(freqLabel, sizeof(freqLabel), "%.1f Hz", hf);
 
             ImVec2 tSz = ImGui::CalcTextSize(freqLabel);
-            float lx = std::min(hx + 4, specPosX_ + specSizeX_ - tSz.x - 4);
-            float ly = specPosY_ + 2;
+            float lx = std::min(hx + 4, wfPosX_ + wfSizeX_ - tSz.x - 4);
+            float ly = wfPosY_ + 2;
             dlp->AddRectFilled({lx - 2, ly - 1}, {lx + tSz.x + 2, ly + tSz.y + 1},
                                IM_COL32(0, 0, 0, 180));
             dlp->AddText({lx, ly}, IM_COL32(220, 220, 240, 240), freqLabel);
@@ -659,11 +658,8 @@ void Application::renderControlPanel() {
 
 void Application::renderSpectrumPanel() {
     float availW = ImGui::GetContentRegionAvail().x;
-    // Use the parent's full content height (availY includes spectrum + splitter + waterfall)
-    // to compute the spectrum height from the split fraction.
-    constexpr float kSplitterH = 6.0f;
-    float parentH = ImGui::GetContentRegionAvail().y;
-    float specH = (parentH - kSplitterH) * spectrumFrac_;
+    // Spectrum is at the bottom — use all remaining height after waterfall + splitter.
+    float specH = ImGui::GetContentRegionAvail().y;
 
     ImVec2 pos = ImGui::GetCursorScreenPos();
     specPosX_ = pos.x;
@@ -717,7 +713,10 @@ void Application::renderSpectrumPanel() {
 
 void Application::renderWaterfallPanel() {
     float availW = ImGui::GetContentRegionAvail().x;
-    float availH = ImGui::GetContentRegionAvail().y;
+    // Waterfall is at the top — compute height from the split fraction.
+    constexpr float kSplitterH = 6.0f;
+    float parentH = ImGui::GetContentRegionAvail().y;
+    float availH = (parentH - kSplitterH) * (1.0f - spectrumFrac_);
 
     // History depth must be >= panel height for 1:1 pixel mapping.
     // Only recreate when bin count or needed height actually changes.
@@ -736,34 +735,32 @@ void Application::renderWaterfallPanel() {
         int h = waterfall_.height();
         // The newest row was just written at currentRow()+1 (mod h) — but
         // advanceRow already decremented, so currentRow() IS the newest.
-        // The row *after* currentRow() (i.e. currentRow()+1) is the oldest
-        // visible row.  We only want the most recent screenRows rows so
-        // that every texture row maps to exactly one screen pixel.
         int screenRows = std::min(static_cast<int>(availH), h);
 
         // Newest row index in the circular buffer.
         int newestRow = (waterfall_.currentRow() + 1) % h;
 
-        // Render 1:1 (one texture row = one screen pixel), top-aligned,
-        // newest line at top (right below the spectrogram), scrolling down.
+        // Render 1:1 (one texture row = one screen pixel), bottom-aligned,
+        // newest line at bottom, scrolling upward.
         //
-        // advanceRow() decrements currentRow_, so rows are written at
-        // decreasing indices.  Going from newest to oldest = increasing
-        // index (mod h).  Normal V order (no flip needed).
+        // We flip the V coordinates (v1 before v0) so that the vertical
+        // direction is reversed: newest at the bottom of the draw region.
         float rowToV = 1.0f / h;
-        float screenY = pos.y;
 
         bool logMode = (freqScale_ == FreqScale::Logarithmic && !settings_.isIQ);
 
+        // drawSpan renders rows [rowStart..rowStart+rowCount) but with
+        // flipped V so oldest is at top and newest at bottom.
         auto drawSpan = [&](int rowStart, int rowCount, float yStart, float spanH) {
             float v0 = rowStart * rowToV;
             float v1 = (rowStart + rowCount) * rowToV;
 
+            // Flip: swap v0 and v1 so texture is vertically inverted
             if (!logMode) {
                 dl->AddImage(texID,
                              {pos.x, yStart},
                              {pos.x + availW, yStart + spanH},
-                             {viewLo_, v0}, {viewHi_, v1});
+                             {viewLo_, v1}, {viewHi_, v0});
             } else {
                 constexpr float kMinBinFrac = 0.001f;
                 float logMin2 = std::log10(kMinBinFrac);
@@ -779,26 +776,32 @@ void Application::renderWaterfallPanel() {
                     dl->AddImage(texID,
                                  {pos.x + sL * availW, yStart},
                                  {pos.x + sR * availW, yStart + spanH},
-                                 {uL, v0}, {uR, v1});
+                                 {uL, v1}, {uR, v0});
                 }
             }
         };
 
         // From newestRow, walk forward (increasing index mod h) for
         // screenRows steps to cover newest→oldest.
-        // Use availH for the screen extent so there's no fractional pixel gap.
+        // With V-flip, oldest rows render at the top, newest at the bottom.
         float pxPerRow = availH / static_cast<float>(screenRows);
 
         if (newestRow + screenRows <= h) {
-            drawSpan(newestRow, screenRows, screenY, availH);
+            drawSpan(newestRow, screenRows, pos.y, availH);
         } else {
-            int firstCount = h - newestRow;
-            float firstH = firstCount * pxPerRow;
-            drawSpan(newestRow, firstCount, screenY, firstH);
+            // Wrap-around: two spans.  Because we flip V, the second span
+            // (wrap-around, containing older rows) goes at the TOP.
+            int firstCount = h - newestRow;  // rows newestRow..h-1
+            int secondCount = screenRows - firstCount;  // rows 0..secondCount-1
 
-            int secondCount = screenRows - firstCount;
+            // Second span (older, wraps to index 0) at top
+            float secondH = secondCount * pxPerRow;
             if (secondCount > 0)
-                drawSpan(0, secondCount, screenY + firstH, availH - firstH);
+                drawSpan(0, secondCount, pos.y, secondH);
+
+            // First span (newer, includes newestRow) at bottom
+            float firstH = availH - secondH;
+            drawSpan(newestRow, firstCount, pos.y + secondH, firstH);
         }
 
         // ── Frequency axis labels ──
@@ -834,7 +837,7 @@ void Application::renderWaterfallPanel() {
             else
                 std::snprintf(label, sizeof(label), "%.0f", freq);
 
-            dl->AddText({x + 2, pos.y + availH - 14}, textCol, label);
+            dl->AddText({x + 2, pos.y + 2}, textCol, label);
         }
 
         // Store waterfall geometry for cross-panel cursor drawing.
