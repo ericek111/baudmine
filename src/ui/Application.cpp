@@ -350,17 +350,6 @@ void Application::render() {
             ImGui::MenuItem("Fill Spectrum", nullptr, &specDisplay_.fillSpectrum);
 
             ImGui::Separator();
-
-            // Frequency scale
-            int fs = static_cast<int>(freqScale_);
-            const char* fsNames[] = {"Linear", "Logarithmic"};
-            ImGui::SetNextItemWidth(120);
-            if (ImGui::Combo("Freq Scale", &fs, fsNames, 2)) {
-                freqScale_ = static_cast<FreqScale>(fs);
-                saveConfig();
-            }
-
-            ImGui::Separator();
             if (ImGui::MenuItem("VSync", nullptr, &vsync_)) {
                 SDL_GL_SetSwapInterval(vsync_ ? 1 : 0);
                 saveConfig();
@@ -616,6 +605,41 @@ void Application::renderControlPanel() {
             ImGui::SameLine();
             if (ImGui::SmallButton("Clear##peakhold"))
                 specDisplay_.clearPeakHold();
+        }
+
+        {
+            bool isLog = (freqScale_ == FreqScale::Logarithmic);
+            bool canLog = !settings_.isIQ;
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("Freq. scale:");
+            ImGui::SameLine();
+            if (ImGui::Button(isLog ? "Logarithmic" : "Linear", {ImGui::GetContentRegionAvail().x, 0})) {
+                if (canLog) {
+                    constexpr float kMinBF = 0.001f;
+                    float logMin = std::log10(kMinBF);
+                    auto screenToBin = [&](float sf) -> float {
+                        if (isLog) return std::pow(10.0f, logMin + sf * (0.0f - logMin));
+                        return sf;
+                    };
+                    auto binToScreen = [&](float bf, bool toLog) -> float {
+                        if (toLog) {
+                            if (bf < kMinBF) bf = kMinBF;
+                            return (std::log10(bf) - logMin) / (0.0f - logMin);
+                        }
+                        return bf;
+                    };
+                    float bfLo = screenToBin(viewLo_);
+                    float bfHi = screenToBin(viewHi_);
+                    bool newLog = !isLog;
+                    freqScale_ = newLog ? FreqScale::Logarithmic : FreqScale::Linear;
+                    viewLo_ = std::clamp(binToScreen(bfLo, newLog), 0.0f, 1.0f);
+                    viewHi_ = std::clamp(binToScreen(bfHi, newLog), 0.0f, 1.0f);
+                    if (viewHi_ <= viewLo_) { viewLo_ = 0.0f; viewHi_ = 1.0f; }
+                    saveConfig();
+                }
+            }
+            if (!canLog && ImGui::IsItemHovered())
+                ImGui::SetTooltip("Log scale not available in I/Q mode");
         }
 
         {
