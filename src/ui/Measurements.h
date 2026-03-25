@@ -46,11 +46,14 @@ public:
     bool showOnSpectrum = true;   // draw markers on spectrum
     bool showOnWaterfall = false; // draw vertical lines on waterfall
     bool showPeakTrace  = false;  // draw peak history curve on waterfall
+    float traceMinFreq  = 0.0f;   // min frequency for peak trace (Hz), 0 = no limit
+    float traceMaxFreq  = 0.0f;   // max frequency for peak trace (Hz), 0 = no limit
 
 private:
     PeakInfo globalPeak_;             // always-tracked highest peak
     std::vector<PeakInfo> peaks_;
 
+    double           lastSampleRate_ = 48000.0;
     // Peak history for waterfall trace (circular buffer, newest at peakHistIdx_)
     std::vector<int> peakHistBins_;   // bin index per waterfall line
     int              peakHistIdx_ = 0;

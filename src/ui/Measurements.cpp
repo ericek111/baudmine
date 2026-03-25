@@ -63,6 +63,7 @@ void Measurements::findPeaks(const std::vector<float>& spectrumDB, int maxN,
 
 void Measurements::update(const std::vector<float>& spectrumDB,
                            double sampleRate, bool isIQ, int fftSize) {
+    lastSampleRate_ = sampleRate;
     // Always track global peak (for the readout label).
     if (!spectrumDB.empty()) {
         auto it = std::max_element(spectrumDB.begin(), spectrumDB.end());
@@ -71,12 +72,30 @@ void Measurements::update(const std::vector<float>& spectrumDB,
         globalPeak_.dB = *it;
         globalPeak_.freq = binToFreq(bin, sampleRate, isIQ, fftSize);
 
-        // Push into peak history circular buffer
+        // Push into peak history circular buffer (with optional freq range filter)
         constexpr int kMaxHistory = 4096;
         if (static_cast<int>(peakHistBins_.size()) < kMaxHistory)
             peakHistBins_.resize(kMaxHistory, -1);
+
+        // Find peak within the trace frequency range
+        int traceBin = bin;
+        int bins = static_cast<int>(spectrumDB.size());
+        if (traceMinFreq > 0.0f || traceMaxFreq > 0.0f) {
+            double fMin = isIQ ? -sampleRate / 2.0 : 0.0;
+            double fMax = isIQ ?  sampleRate / 2.0 : sampleRate / 2.0;
+            int loB = 0, hiB = bins - 1;
+            if (traceMinFreq > 0.0f)
+                loB = std::max(0, static_cast<int>((traceMinFreq - fMin) / (fMax - fMin) * bins));
+            if (traceMaxFreq > 0.0f)
+                hiB = std::min(bins - 1, static_cast<int>((traceMaxFreq - fMin) / (fMax - fMin) * bins));
+            if (loB <= hiB) {
+                auto rangeIt = std::max_element(spectrumDB.begin() + loB, spectrumDB.begin() + hiB + 1);
+                traceBin = static_cast<int>(std::distance(spectrumDB.begin(), rangeIt));
+            }
+        }
+
         peakHistIdx_ = (peakHistIdx_ + 1) % kMaxHistory;
-        peakHistBins_[peakHistIdx_] = bin;
+        peakHistBins_[peakHistIdx_] = traceBin;
         if (peakHistLen_ < kMaxHistory) ++peakHistLen_;
     }
 
@@ -222,6 +241,21 @@ void Measurements::drawWaterfall(const SpectrumDisplay& specDisplay,
 
 void Measurements::drawPanel() {
     ImGui::Checkbox("Peak trace", &showPeakTrace);
+    if (showPeakTrace) {
+        ImGui::SameLine();
+        float nyquistKHz = static_cast<float>(lastSampleRate_ / 2000.0);
+        float minKHz = traceMinFreq / 1000.0f;
+        float maxKHz = traceMaxFreq / 1000.0f;
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+        if (ImGui::DragFloatRange2("##tracerange", &minKHz, &maxKHz, 0.01f,
+                                    0.0f, nyquistKHz,
+                                    minKHz > 0.0f ? "%.2f kHz" : "Min",
+                                    maxKHz > 0.0f ? "%.2f kHz" : "Max")) {
+            traceMinFreq = std::max(0.0f, minKHz * 1000.0f);
+            traceMaxFreq = std::max(0.0f, maxKHz * 1000.0f);
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Peak trace frequency range (0 = no limit)");
+    }
     if (!enabled) return;
 
     ImGui::SetNextItemWidth(-1);
