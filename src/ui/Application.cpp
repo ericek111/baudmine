@@ -649,14 +649,12 @@ void Application::renderWaterfallPanel() {
     float availW = ImGui::GetContentRegionAvail().x;
     float availH = ImGui::GetContentRegionAvail().y;
 
-    // Fixed history depth — independent of screen height, so resizing the
-    // splitter doesn't recreate the texture every frame.
-    constexpr int kHistoryRows = 1024;
-
-    // Only recreate when the bin count (FFT size) changes.
+    // History depth must be >= panel height for 1:1 pixel mapping.
+    // Only recreate when bin count or needed height actually changes.
+    int neededH = std::max(1024, static_cast<int>(availH) + 1);
     int binCount = std::max(1, analyzer_.spectrumSize());
-    if (binCount != waterfall_.width() || waterfall_.height() != kHistoryRows) {
-        waterfall_.resize(binCount, kHistoryRows);
+    if (binCount != waterfall_.width() || waterfall_.height() < neededH) {
+        waterfall_.resize(binCount, neededH);
         waterfall_.setColorMap(colorMap_);
     }
 
@@ -718,19 +716,19 @@ void Application::renderWaterfallPanel() {
 
         // From newestRow, walk forward (increasing index mod h) for
         // screenRows steps to cover newest→oldest.
+        // Use availH for the screen extent so there's no fractional pixel gap.
+        float pxPerRow = availH / static_cast<float>(screenRows);
+
         if (newestRow + screenRows <= h) {
-            // No wrap: rows [newestRow .. newestRow+screenRows)
-            drawSpan(newestRow, screenRows, screenY, static_cast<float>(screenRows));
+            drawSpan(newestRow, screenRows, screenY, availH);
         } else {
-            // Wraps: [newestRow .. h), then [0 .. remainder)
             int firstCount = h - newestRow;
-            float firstH = static_cast<float>(firstCount);
+            float firstH = firstCount * pxPerRow;
             drawSpan(newestRow, firstCount, screenY, firstH);
 
             int secondCount = screenRows - firstCount;
-            float secondH = static_cast<float>(secondCount);
             if (secondCount > 0)
-                drawSpan(0, secondCount, screenY + firstH, secondH);
+                drawSpan(0, secondCount, screenY + firstH, availH - firstH);
         }
 
         // ── Frequency axis labels ──
@@ -1011,9 +1009,9 @@ void Application::updateAnalyzerSettings() {
 
         // Re-init waterfall texture so the old image from a different FFT
         // size doesn't persist.
-        constexpr int kHistoryRows = 1024;
+        int reinitH = std::max(1024, waterfall_.height());
         int binCount2 = std::max(1, analyzer_.spectrumSize());
-        waterfall_.init(binCount2, kHistoryRows);
+        waterfall_.init(binCount2, reinitH);
     }
 }
 
