@@ -186,12 +186,11 @@ void Measurements::drawPanel() {
             ImU32 col = (i == 0) ? IM_COL32(255, 80, 80, 255)
                                  : IM_COL32(255, 140, 60, 255);
             ImGui::PushStyleColor(ImGuiCol_Text, col);
-            if (std::abs(p.freq) >= 1e6)
-                ImGui::Text("P%d: %.6f MHz, %.1f dB", i + 1, p.freq / 1e6, p.dB);
-            else if (std::abs(p.freq) >= 1e3)
-                ImGui::Text("P%d: %.3f kHz, %.1f dB", i + 1, p.freq / 1e3, p.dB);
-            else
-                ImGui::Text("P%d: %.1f Hz, %.1f dB", i + 1, p.freq, p.dB);
+            char plabel[4];
+            std::snprintf(plabel, sizeof(plabel), "P%d", i + 1);
+            char pbuf[128];
+            fmtFreqDB(pbuf, sizeof(pbuf), plabel, p.freq, p.dB);
+            ImGui::Text("%s", pbuf);
             ImGui::PopStyleColor();
         }
     }

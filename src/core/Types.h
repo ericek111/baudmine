@@ -2,6 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cmath>
 #include <complex>
 #include <string>
 #include <vector>
@@ -83,6 +85,28 @@ inline const char* inputFormatName(InputFormat f) {
         case InputFormat::PortAudio: return "PortAudio";
         default:                     return "Unknown";
     }
+}
+
+// ── Formatting helpers ───────────────────────────────────────────────────────
+
+// Format frequency into buf with fixed-width numeric field per unit range.
+inline int fmtFreq(char* buf, size_t sz, double freq) {
+    if (std::abs(freq) >= 1e6)
+        return std::snprintf(buf, sz, "% 10.6f MHz", freq / 1e6);
+    else if (std::abs(freq) >= 1e3)
+        return std::snprintf(buf, sz, "% 7.3f kHz", freq / 1e3);
+    else
+        return std::snprintf(buf, sz, "% 7.1f Hz", freq);
+}
+
+// Format "label: freq, dB" into buf for sidebar display (fixed-width freq + dB).
+inline int fmtFreqDB(char* buf, size_t sz, const char* label, double freq, float dB) {
+    if (std::abs(freq) >= 1e6)
+        return std::snprintf(buf, sz, "%s: % 10.6f MHz %6.1f dB", label, freq / 1e6, dB);
+    else if (std::abs(freq) >= 1e3)
+        return std::snprintf(buf, sz, "%s: % 7.3f kHz %6.1f dB", label, freq / 1e3, dB);
+    else
+        return std::snprintf(buf, sz, "%s:  % 7.1f Hz %6.1f dB", label, freq, dB);
 }
 
 // ── Spectrum data ────────────────────────────────────────────────────────────

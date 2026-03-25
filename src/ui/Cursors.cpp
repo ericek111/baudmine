@@ -78,12 +78,7 @@ void Cursors::draw(const SpectrumDisplay& specDisplay,
 
     // Format a cursor label string.
     auto formatLabel = [](char* buf, size_t sz, const char* label, double freq, float dB) {
-        if (std::abs(freq) >= 1e6)
-            std::snprintf(buf, sz, "%s: %.6f MHz  %.1f dB", label, freq / 1e6, dB);
-        else if (std::abs(freq) >= 1e3)
-            std::snprintf(buf, sz, "%s: %.3f kHz  %.1f dB", label, freq / 1e3, dB);
-        else
-            std::snprintf(buf, sz, "%s: %.1f Hz  %.1f dB", label, freq, dB);
+        fmtFreqDB(buf, sz, label, freq, dB);
     };
 
     float aDB = avgDBA(), bDB = avgDBB();
@@ -124,12 +119,7 @@ void Cursors::draw(const SpectrumDisplay& specDisplay,
         double dFreq = cursorB.freq - cursorA.freq;
         float dDB = bDB - aDB;
         char val1[48], val2[48];
-        if (std::abs(dFreq) >= 1e6)
-            std::snprintf(val1, sizeof(val1), "%.6f MHz", dFreq / 1e6);
-        else if (std::abs(dFreq) >= 1e3)
-            std::snprintf(val1, sizeof(val1), "%.3f kHz", dFreq / 1e3);
-        else
-            std::snprintf(val1, sizeof(val1), "%.1f Hz", dFreq);
+        fmtFreq(val1, sizeof(val1), dFreq);
         std::snprintf(val2, sizeof(val2), "%.1f dB", dDB);
 
         ImVec2 labelSz = ImGui::CalcTextSize("dF = ");
@@ -138,7 +128,7 @@ void Cursors::draw(const SpectrumDisplay& specDisplay,
         float valW = std::max(v1Sz.x, v2Sz.x);
         float lineH = labelSz.y;
         float totalW = labelSz.x + valW;
-        float tx = posX + sizeX - totalW - 8;
+        float tx = posX + sizeX - totalW - 158;
         float ty = posY + 4;
         ImU32 col = IM_COL32(255, 200, 100, 255);
         float eqX = tx + labelSz.x;  // values start here (right of '= ')
@@ -158,12 +148,9 @@ void Cursors::drawPanel() {
             ImGui::TextDisabled("%s: --", label);
             return;
         }
-        if (std::abs(c.freq) >= 1e6)
-            ImGui::Text("%s: %.6f MHz, %.1f dB", label, c.freq / 1e6, dispDB);
-        else if (std::abs(c.freq) >= 1e3)
-            ImGui::Text("%s: %.3f kHz, %.1f dB", label, c.freq / 1e3, dispDB);
-        else
-            ImGui::Text("%s: %.1f Hz, %.1f dB", label, c.freq, dispDB);
+        char buf[128];
+        fmtFreqDB(buf, sizeof(buf), label, c.freq, dispDB);
+        ImGui::Text("%s", buf);
     };
 
     float aDB = avgDBA(), bDB = avgDBB();
@@ -173,21 +160,9 @@ void Cursors::drawPanel() {
     if (cursorA.active && cursorB.active) {
         double dF = cursorB.freq - cursorA.freq;
         float dA = bDB - aDB;
-        if (std::abs(dF) >= 1e6)
-            ImGui::Text("D: %.6f MHz, %.1f dB", dF / 1e6, dA);
-        else if (std::abs(dF) >= 1e3)
-            ImGui::Text("D: %.3f kHz, %.1f dB", dF / 1e3, dA);
-        else
-            ImGui::Text("D: %.1f Hz, %.1f dB", dF, dA);
-    }
-
-    if (hover.active) {
-        if (std::abs(hover.freq) >= 1e6)
-            ImGui::TextDisabled("%.6f MHz, %.1f dB", hover.freq / 1e6, hover.dB);
-        else if (std::abs(hover.freq) >= 1e3)
-            ImGui::TextDisabled("%.3f kHz, %.1f dB", hover.freq / 1e3, hover.dB);
-        else
-            ImGui::TextDisabled("%.1f Hz, %.1f dB", hover.freq, hover.dB);
+        char dbuf[128];
+        fmtFreqDB(dbuf, sizeof(dbuf), "D", dF, dA);
+        ImGui::Text("%s", dbuf);
     }
 
     // Averaging slider (logarithmic scale)

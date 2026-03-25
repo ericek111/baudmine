@@ -460,13 +460,7 @@ void Application::render() {
 
             // Frequency label at top of waterfall
             char freqLabel[48];
-            double hf = cursors_.hover.freq;
-            if (std::abs(hf) >= 1e6)
-                std::snprintf(freqLabel, sizeof(freqLabel), "%.6f MHz", hf / 1e6);
-            else if (std::abs(hf) >= 1e3)
-                std::snprintf(freqLabel, sizeof(freqLabel), "%.3f kHz", hf / 1e3);
-            else
-                std::snprintf(freqLabel, sizeof(freqLabel), "%.1f Hz", hf);
+            fmtFreq(freqLabel, sizeof(freqLabel), cursors_.hover.freq);
 
             ImVec2 tSz = ImGui::CalcTextSize(freqLabel);
             float lx = std::min(hx + 4, wfPosX_ + wfSizeX_ - tSz.x - 4);
@@ -572,7 +566,8 @@ void Application::renderControlPanel() {
     if (ImGui::CollapsingHeader("FFT", ImGuiTreeNodeFlags_DefaultOpen)) {
         const char* sizeNames[] = {"256", "512", "1024", "2048", "4096",
                                    "8192", "16384", "32768", "65536"};
-        ImGui::SetNextItemWidth(-1);
+        float halfW = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+        ImGui::SetNextItemWidth(halfW);
         if (ImGui::Combo("##fftsize", &fftSizeIdx_, sizeNames, kNumFFTSizes)) {
             settings_.fftSize = kFFTSizes[fftSizeIdx_];
             updateAnalyzerSettings();
@@ -580,9 +575,10 @@ void Application::renderControlPanel() {
         }
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("FFT Size");
 
+        ImGui::SameLine();
         const char* winNames[] = {"Rectangular", "Hann", "Hamming", "Blackman",
                                   "Blackman-Harris", "Kaiser", "Flat Top"};
-        ImGui::SetNextItemWidth(-1);
+        ImGui::SetNextItemWidth(halfW);
         if (ImGui::Combo("##window", &windowIdx_, winNames,
                          static_cast<int>(WindowType::Count))) {
             settings_.window = static_cast<WindowType>(windowIdx_);
@@ -621,7 +617,7 @@ void Application::renderControlPanel() {
             ImVec2 rMax = ImGui::GetItemRectMax();
             float tx = rMin.x + ((rMax.x - rMin.x) - textSize.x) * 0.5f;
             float ty = rMin.y + ((rMax.y - rMin.y) - textSize.y) * 0.5f;
-            ImGui::GetForegroundDrawList()->AddText({tx, ty}, IM_COL32(255, 255, 255, 220), overlayText);
+            ImGui::GetWindowDrawList()->AddText({tx, ty}, IM_COL32(255, 255, 255, 220), overlayText);
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Overlap");
         }
     }
@@ -635,6 +631,7 @@ void Application::renderControlPanel() {
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("dB Range (min / max)");
 
         ImGui::Checkbox("Peak Hold", &specDisplay_.peakHoldEnable);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Draws a \"maximum\" line in the spectrogram");
         if (specDisplay_.peakHoldEnable) {
             ImGui::SameLine();
             ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x
@@ -669,6 +666,7 @@ void Application::renderControlPanel() {
                 viewLo_ = 0.0f;
                 viewHi_ = 0.5f;
             }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Reset to 2x zoom");
         }
     }
 
@@ -829,12 +827,11 @@ void Application::renderControlPanel() {
     int pkCh2 = std::clamp(waterfallChannel_, 0, analyzer_.numSpectra() - 1);
     auto [peakBin, peakDB] = analyzer_.findPeak(pkCh2);
     double peakFreq = analyzer_.binToFreq(peakBin);
-    if (std::abs(peakFreq) >= 1e6)
-        ImGui::TextDisabled("Peak: %.6f MHz, %.1f dB", peakFreq / 1e6, peakDB);
-    else if (std::abs(peakFreq) >= 1e3)
-        ImGui::TextDisabled("Peak: %.3f kHz, %.1f dB", peakFreq / 1e3, peakDB);
-    else
-        ImGui::TextDisabled("Peak: %.1f Hz, %.1f dB", peakFreq, peakDB);
+    {
+        char peakBuf[128];
+        fmtFreqDB(peakBuf, sizeof(peakBuf), "Peak", peakFreq, peakDB);
+        ImGui::TextDisabled("%s", peakBuf);
+    }
 }
 
 void Application::renderSpectrumPanel() {
