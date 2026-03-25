@@ -5,7 +5,12 @@
 #include <imgui_impl_sdl2.h>
 #include <imgui_impl_opengl3.h>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#include <GLES2/gl2.h>
+#else
 #include <GL/gl.h>
+#endif
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
@@ -44,8 +49,14 @@ bool Application::init(int argc, char** argv) {
         return false;
     }
 
+#ifdef __EMSCRIPTEN__
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#else
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+#endif
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 
     window_ = SDL_CreateWindow("Baudline Spectrum Analyzer",
@@ -75,7 +86,11 @@ bool Application::init(int argc, char** argv) {
     style.GrabRounding = 2.0f;
 
     ImGui_ImplSDL2_InitForOpenGL(window_, glContext_);
+#ifdef __EMSCRIPTEN__
+    ImGui_ImplOpenGL3_Init("#version 100");
+#else
     ImGui_ImplOpenGL3_Init("#version 120");
+#endif
 
     // Enumerate audio devices
     paDevices_ = MiniAudioSource::listInputDevices();
@@ -110,32 +125,48 @@ bool Application::init(int argc, char** argv) {
     return true;
 }
 
-void Application::run() {
-    while (running_) {
-        SDL_Event event;
-        while (SDL_PollEvent(&event)) {
-            ImGui_ImplSDL2_ProcessEvent(&event);
-            if (event.type == SDL_QUIT)
-                running_ = false;
-            if (event.type == SDL_KEYDOWN) {
-                auto key = event.key.keysym.sym;
-                if (key == SDLK_ESCAPE) running_ = false;
-                if (key == SDLK_SPACE)  paused_ = !paused_;
-                if (key == SDLK_p) {
-                    int pkCh = std::clamp(waterfallChannel_, 0,
-                                          analyzer_.numSpectra() - 1);
-                    cursors_.snapToPeak(analyzer_.channelSpectrum(pkCh),
-                                        settings_.sampleRate, settings_.isIQ,
-                                        settings_.fftSize);
-                }
+void Application::mainLoopStep() {
+    SDL_Event event;
+    while (SDL_PollEvent(&event)) {
+        ImGui_ImplSDL2_ProcessEvent(&event);
+        if (event.type == SDL_QUIT)
+            running_ = false;
+        if (event.type == SDL_KEYDOWN) {
+            auto key = event.key.keysym.sym;
+#ifndef __EMSCRIPTEN__
+            if (key == SDLK_ESCAPE) running_ = false;
+#endif
+            if (key == SDLK_SPACE)  paused_ = !paused_;
+            if (key == SDLK_p) {
+                int pkCh = std::clamp(waterfallChannel_, 0,
+                                      analyzer_.numSpectra() - 1);
+                cursors_.snapToPeak(analyzer_.channelSpectrum(pkCh),
+                                    settings_.sampleRate, settings_.isIQ,
+                                    settings_.fftSize);
             }
         }
-
-        if (!paused_)
-            processAudio();
-
-        render();
     }
+
+    if (!paused_)
+        processAudio();
+
+    render();
+}
+
+#ifdef __EMSCRIPTEN__
+static void emMainLoop(void* arg) {
+    static_cast<Application*>(arg)->mainLoopStep();
+}
+#endif
+
+void Application::run() {
+#ifdef __EMSCRIPTEN__
+    emscripten_set_main_loop_arg(emMainLoop, this, 0, true);
+#else
+    while (running_) {
+        mainLoopStep();
+    }
+#endif
 }
 
 void Application::shutdown() {
@@ -1310,6 +1341,9 @@ void Application::renderMathPanel() {
 }
 
 void Application::loadConfig() {
+#ifdef __EMSCRIPTEN__
+    return;  // No filesystem config on WASM
+#endif
     config_.load();
     fftSizeIdx_   = config_.getInt("fft_size_idx", fftSizeIdx_);
     overlapPct_   = config_.getFloat("overlap_pct", overlapPct_);
@@ -1351,6 +1385,9 @@ void Application::loadConfig() {
 }
 
 void Application::saveConfig() const {
+#ifdef __EMSCRIPTEN__
+    return;
+#endif
     Config cfg;
     cfg.setInt("fft_size_idx", fftSizeIdx_);
     cfg.setFloat("overlap_pct", overlapPct_);

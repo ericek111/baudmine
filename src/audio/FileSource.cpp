@@ -24,11 +24,17 @@ bool FileSource::open() {
     eof_ = false;
 
     if (format_ == InputFormat::WAV) {
+#ifndef __EMSCRIPTEN__
         std::memset(&sfInfo_, 0, sizeof(sfInfo_));
         sndFile_ = sf_open(path_.c_str(), SFM_READ, &sfInfo_);
         if (!sndFile_) return false;
         sampleRate_ = sfInfo_.samplerate;
         channels_   = sfInfo_.channels;
+#else
+        if (!wavReader_.open(path_)) return false;
+        sampleRate_ = wavReader_.sampleRate();
+        channels_   = wavReader_.channels();
+#endif
         return true;
     }
 
@@ -44,10 +50,14 @@ bool FileSource::open() {
 }
 
 void FileSource::close() {
+#ifndef __EMSCRIPTEN__
     if (sndFile_) {
         sf_close(sndFile_);
         sndFile_ = nullptr;
     }
+#else
+    wavReader_.close();
+#endif
     if (rawFile_.is_open()) {
         rawFile_.close();
     }
@@ -81,8 +91,13 @@ size_t FileSource::read(float* buffer, size_t frames) {
 
 void FileSource::seek(double seconds) {
     eof_ = false;
-    if (format_ == InputFormat::WAV && sndFile_) {
-        sf_seek(sndFile_, static_cast<sf_count_t>(seconds * sampleRate_), SEEK_SET);
+    if (format_ == InputFormat::WAV) {
+#ifndef __EMSCRIPTEN__
+        if (sndFile_)
+            sf_seek(sndFile_, static_cast<sf_count_t>(seconds * sampleRate_), SEEK_SET);
+#else
+        wavReader_.seekFrame(static_cast<size_t>(seconds * sampleRate_));
+#endif
     } else if (rawFile_.is_open()) {
         size_t bytesPerFrame = 0;
         switch (format_) {
@@ -98,8 +113,14 @@ void FileSource::seek(double seconds) {
 }
 
 double FileSource::duration() const {
-    if (format_ == InputFormat::WAV && sfInfo_.samplerate > 0) {
-        return static_cast<double>(sfInfo_.frames) / sfInfo_.samplerate;
+    if (format_ == InputFormat::WAV) {
+#ifndef __EMSCRIPTEN__
+        if (sfInfo_.samplerate > 0)
+            return static_cast<double>(sfInfo_.frames) / sfInfo_.samplerate;
+#else
+        if (wavReader_.sampleRate() > 0 && wavReader_.totalFrames() > 0)
+            return static_cast<double>(wavReader_.totalFrames()) / wavReader_.sampleRate();
+#endif
     }
     if (rawFileSize_ > 0) {
         size_t bytesPerFrame = 0;
@@ -118,9 +139,13 @@ double FileSource::duration() const {
 // ── Format-specific readers ──────────────────────────────────────────────────
 
 size_t FileSource::readWAV(float* buffer, size_t frames) {
+#ifndef __EMSCRIPTEN__
     if (!sndFile_) return 0;
     sf_count_t got = sf_readf_float(sndFile_, buffer, frames);
     return (got > 0) ? static_cast<size_t>(got) : 0;
+#else
+    return wavReader_.readFloat(buffer, frames);
+#endif
 }
 
 size_t FileSource::readRawFloat32(float* buffer, size_t frames) {

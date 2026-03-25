@@ -75,6 +75,7 @@ public:
 
     bool init(int argc, char** argv);
     void run();
+    void mainLoopStep();  // single iteration (public for Emscripten callback)
     void shutdown();
 
 private:

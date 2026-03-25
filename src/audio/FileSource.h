@@ -2,14 +2,19 @@
 
 #include "audio/AudioSource.h"
 #include "core/Types.h"
+#ifndef __EMSCRIPTEN__
 #include <sndfile.h>
+#else
+#include "audio/WavReader.h"
+#endif
 #include <fstream>
 #include <string>
 #include <vector>
 
 namespace baudline {
 
-// Reads WAV files (via libsndfile) and raw I/Q files (float32, int16, uint8).
+// Reads WAV files and raw I/Q files (float32, int16, uint8).
+// Native builds use libsndfile; WASM builds use a built-in WAV reader.
 class FileSource : public AudioSource {
 public:
     // For WAV files: format is auto-detected, sampleRate/channels from file header.
@@ -46,9 +51,14 @@ private:
     bool          loop_;
     bool          eof_ = false;
 
-    // WAV via libsndfile
+#ifndef __EMSCRIPTEN__
+    // WAV via libsndfile (native)
     SNDFILE*      sndFile_  = nullptr;
     SF_INFO       sfInfo_{};
+#else
+    // WAV via built-in reader (WASM)
+    WavReader     wavReader_;
+#endif
 
     // Raw I/Q files
     std::ifstream rawFile_;
