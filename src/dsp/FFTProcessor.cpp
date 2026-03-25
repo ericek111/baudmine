@@ -85,15 +85,13 @@ void FFTProcessor::processComplex(const float* inputIQ,
     }
 }
 
-// Convenience overloads (no complex output).
+// Convenience overloads (no complex output) — reuse scratch buffer.
 void FFTProcessor::processReal(const float* input, std::vector<float>& outputDB) {
-    std::vector<std::complex<float>> dummy;
-    processReal(input, outputDB, dummy);
+    processReal(input, outputDB, scratchCplx_);
 }
 
 void FFTProcessor::processComplex(const float* inputIQ, std::vector<float>& outputDB) {
-    std::vector<std::complex<float>> dummy;
-    processComplex(inputIQ, outputDB, dummy);
+    processComplex(inputIQ, outputDB, scratchCplx_);
 }
 
 } // namespace baudline

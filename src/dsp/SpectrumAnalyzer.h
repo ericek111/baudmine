@@ -63,6 +63,11 @@ private:
     std::vector<std::vector<std::complex<float>>>    channelComplex_;
     std::vector<std::deque<std::vector<float>>>      channelWaterfalls_;
     bool                                             newSpectrumReady_ = false;
+
+    // Pre-allocated scratch buffers for processBlock (avoid per-frame heap alloc)
+    std::vector<float>  windowedBuf_;   // IQ mode: windowed interleaved samples
+    std::vector<float>  chanBuf_;       // real mode: single-channel scratch
+    float               windowCorrection_ = 0.0f;
 };
 
 } // namespace baudline

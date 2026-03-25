@@ -170,6 +170,12 @@ private:
     // Panel geometry (stored for cursor interaction)
     float specPosX_ = 0, specPosY_ = 0, specSizeX_ = 0, specSizeY_ = 0;
     float wfPosX_ = 0, wfPosY_ = 0, wfSizeX_ = 0, wfSizeY_ = 0;
+
+    // Pre-allocated scratch buffers (avoid per-frame heap allocations)
+    std::vector<std::vector<float>>  wfSpectraScratch_;
+    std::vector<WaterfallChannelInfo> wfChInfoScratch_;
+    std::vector<std::vector<float>>  allSpectraScratch_;
+    std::vector<ChannelStyle>        stylesScratch_;
 };
 
 } // namespace baudline

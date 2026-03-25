@@ -26,6 +26,9 @@ void SpectrumAnalyzer::configure(const AnalyzerSettings& settings) {
     hopSize_ = static_cast<size_t>(settings_.fftSize * (1.0f - settings_.overlap));
     if (hopSize_ < 1) hopSize_ = 1;
 
+    // Cache window gain correction (avoid recomputing per block).
+    windowCorrection_ = -20.0f * std::log10(windowGain_ > 0 ? windowGain_ : 1.0f);
+
     if (sizeChanged) {
         accumBuf_.assign(settings_.fftSize * inCh, 0.0f);
         accumPos_ = 0;
@@ -36,6 +39,13 @@ void SpectrumAnalyzer::configure(const AnalyzerSettings& settings) {
         channelSpectra_.assign(nSpec, std::vector<float>(specSz, -200.0f));
         channelComplex_.assign(nSpec, std::vector<std::complex<float>>(specSz, {0,0}));
         channelWaterfalls_.assign(nSpec, {});
+
+        // Pre-allocate scratch buffers.
+        if (settings_.isIQ) {
+            windowedBuf_.resize(settings_.fftSize * 2);
+        } else {
+            chanBuf_.resize(settings_.fftSize);
+        }
 
         newSpectrumReady_ = false;
     }
@@ -74,38 +84,27 @@ void SpectrumAnalyzer::processBlock() {
     int N    = settings_.fftSize;
     int inCh = settings_.inputChannels();
     int nSpec = static_cast<int>(channelSpectra_.size());
-    int specSz = fft_.spectrumSize();
-
-    std::vector<std::vector<float>> tempDBs(nSpec);
-    std::vector<std::vector<std::complex<float>>> tempCplx(nSpec);
 
     if (settings_.isIQ) {
-        std::vector<float> windowed(N * 2);
         for (int i = 0; i < N; ++i) {
-            windowed[2 * i]     = accumBuf_[2 * i]     * window_[i];
-            windowed[2 * i + 1] = accumBuf_[2 * i + 1] * window_[i];
+            windowedBuf_[2 * i]     = accumBuf_[2 * i]     * window_[i];
+            windowedBuf_[2 * i + 1] = accumBuf_[2 * i + 1] * window_[i];
         }
-        fft_.processComplex(windowed.data(), tempDBs[0], tempCplx[0]);
+        fft_.processComplex(windowedBuf_.data(), channelSpectra_[0], channelComplex_[0]);
     } else {
-        std::vector<float> chanBuf(N);
         for (int ch = 0; ch < nSpec; ++ch) {
             for (int i = 0; i < N; ++i)
-                chanBuf[i] = accumBuf_[i * inCh + ch];
-            WindowFunctions::apply(window_, chanBuf.data(), N);
-            fft_.processReal(chanBuf.data(), tempDBs[ch], tempCplx[ch]);
+                chanBuf_[i] = accumBuf_[i * inCh + ch];
+            WindowFunctions::apply(window_, chanBuf_.data(), N);
+            fft_.processReal(chanBuf_.data(), channelSpectra_[ch], channelComplex_[ch]);
         }
     }
 
-    // Window gain correction.
-    float correction = -20.0f * std::log10(windowGain_ > 0 ? windowGain_ : 1.0f);
-    for (auto& db : tempDBs)
-        for (float& v : db)
-            v += correction;
-
+    // Apply cached window gain correction.
     for (int ch = 0; ch < nSpec; ++ch) {
-        channelSpectra_[ch] = tempDBs[ch];
-        channelComplex_[ch] = tempCplx[ch];
-        channelWaterfalls_[ch].push_back(tempDBs[ch]);
+        for (float& v : channelSpectra_[ch])
+            v += windowCorrection_;
+        channelWaterfalls_[ch].push_back(channelSpectra_[ch]);
         if (channelWaterfalls_[ch].size() > kWaterfallHistory)
             channelWaterfalls_[ch].pop_front();
     }

@@ -49,6 +49,10 @@ private:
 
     ColorMap             colorMap_;
     std::vector<uint8_t> pixelBuf_;
+
+    // Scratch buffer for pushLineMulti (pre-filtered enabled channels).
+    struct ActiveCh { const float* data; int bins; float r, g, b; };
+    std::vector<ActiveCh> activeChBuf_;
 };
 
 } // namespace baudline

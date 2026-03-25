@@ -71,28 +71,35 @@ void WaterfallDisplay::pushLineMulti(
         float minDB, float maxDB) {
     if (width_ == 0 || height_ == 0) return;
 
-    int nCh = static_cast<int>(channelSpectra.size());
     int row = currentRow_;
     int rowOffset = row * width_ * 3;
     float range = maxDB - minDB;
     if (range < 1.0f) range = 1.0f;
+    float invRange = 1.0f / range;
+
+    // Pre-filter enabled channels to avoid per-texel branching.
+    struct ActiveCh { const float* data; int bins; float r, g, b; };
+    activeChBuf_.clear();
+    int nCh = std::min(static_cast<int>(channelSpectra.size()),
+                       static_cast<int>(channels.size()));
+    for (int ch = 0; ch < nCh; ++ch) {
+        if (!channels[ch].enabled || channelSpectra[ch].empty()) continue;
+        activeChBuf_.push_back({channelSpectra[ch].data(),
+                                static_cast<int>(channelSpectra[ch].size()),
+                                channels[ch].r, channels[ch].g, channels[ch].b});
+    }
 
     // One texel per bin — direct 1:1 mapping.
     for (int x = 0; x < width_; ++x) {
         float accR = 0.0f, accG = 0.0f, accB = 0.0f;
 
-        for (int ch = 0; ch < nCh; ++ch) {
-            if (ch >= static_cast<int>(channels.size()) || !channels[ch].enabled)
-                continue;
-            if (channelSpectra[ch].empty()) continue;
+        for (const auto& ac : activeChBuf_) {
+            float dB = (x < ac.bins) ? ac.data[x] : -200.0f;
+            float intensity = std::clamp((dB - minDB) * invRange, 0.0f, 1.0f);
 
-            int bins = static_cast<int>(channelSpectra[ch].size());
-            float dB = (x < bins) ? channelSpectra[ch][x] : -200.0f;
-            float intensity = std::clamp((dB - minDB) / range, 0.0f, 1.0f);
-
-            accR += channels[ch].r * intensity;
-            accG += channels[ch].g * intensity;
-            accB += channels[ch].b * intensity;
+            accR += ac.r * intensity;
+            accG += ac.g * intensity;
+            accB += ac.b * intensity;
         }
 
         pixelBuf_[rowOffset + x * 3 + 0] =
@@ -112,7 +119,7 @@ void WaterfallDisplay::uploadRow(int row) {
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, row, width_, 1,
                     GL_RGB, GL_UNSIGNED_BYTE,
                     pixelBuf_.data() + row * width_ * 3);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    // Note: no unbind — ImGui will bind its own textures before drawing.
 }
 
 } // namespace baudline

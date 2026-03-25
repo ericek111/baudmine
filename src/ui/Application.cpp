@@ -183,24 +183,24 @@ void Application::processAudio() {
             int nSpec = analyzer_.numSpectra();
             if (waterfallMultiCh_ && nSpec > 1) {
                 // Multi-channel overlay waterfall: physical + math channels.
-                std::vector<std::vector<float>> wfSpectra;
-                std::vector<WaterfallChannelInfo> wfChInfo;
+                wfSpectraScratch_.clear();
+                wfChInfoScratch_.clear();
 
                 for (int ch = 0; ch < nSpec; ++ch) {
                     const auto& c = channelColors_[ch % kMaxChannels];
-                    wfSpectra.push_back(analyzer_.channelSpectrum(ch));
-                    wfChInfo.push_back({c.x, c.y, c.z,
+                    wfSpectraScratch_.push_back(analyzer_.channelSpectrum(ch));
+                    wfChInfoScratch_.push_back({c.x, c.y, c.z,
                                         channelEnabled_[ch % kMaxChannels]});
                 }
                 for (size_t mi = 0; mi < mathChannels_.size(); ++mi) {
                     if (mathChannels_[mi].enabled && mathChannels_[mi].waterfall &&
                         mi < mathSpectra_.size()) {
                         const auto& c = mathChannels_[mi].color;
-                        wfSpectra.push_back(mathSpectra_[mi]);
-                        wfChInfo.push_back({c.x, c.y, c.z, true});
+                        wfSpectraScratch_.push_back(mathSpectra_[mi]);
+                        wfChInfoScratch_.push_back({c.x, c.y, c.z, true});
                     }
                 }
-                waterfall_.pushLineMulti(wfSpectra, wfChInfo, minDB_, maxDB_);
+                waterfall_.pushLineMulti(wfSpectraScratch_, wfChInfoScratch_, minDB_, maxDB_);
             } else {
                 int wfCh = std::clamp(waterfallChannel_, 0, nSpec - 1);
                 waterfall_.pushLine(analyzer_.channelSpectrum(wfCh),
@@ -601,37 +601,34 @@ void Application::renderSpectrumPanel() {
     // Build per-channel styles and combine physical + math spectra.
     int nPhys = analyzer_.numSpectra();
     int nMath = static_cast<int>(mathSpectra_.size());
-    int nTotal = nPhys + nMath;
 
-    std::vector<std::vector<float>> allSpectra;
-    std::vector<ChannelStyle> styles;
-    allSpectra.reserve(nTotal);
-    styles.reserve(nTotal);
+    allSpectraScratch_.clear();
+    stylesScratch_.clear();
 
     // Physical channels.
     for (int ch = 0; ch < nPhys; ++ch) {
-        allSpectra.push_back(analyzer_.channelSpectrum(ch));
+        allSpectraScratch_.push_back(analyzer_.channelSpectrum(ch));
         const auto& c = channelColors_[ch % kMaxChannels];
         uint8_t r = static_cast<uint8_t>(c.x * 255);
         uint8_t g = static_cast<uint8_t>(c.y * 255);
         uint8_t b = static_cast<uint8_t>(c.z * 255);
-        styles.push_back({IM_COL32(r, g, b, 220), IM_COL32(r, g, b, 35)});
+        stylesScratch_.push_back({IM_COL32(r, g, b, 220), IM_COL32(r, g, b, 35)});
     }
 
     // Math channels.
     for (int mi = 0; mi < nMath; ++mi) {
         if (mi < static_cast<int>(mathChannels_.size()) && mathChannels_[mi].enabled) {
-            allSpectra.push_back(mathSpectra_[mi]);
+            allSpectraScratch_.push_back(mathSpectra_[mi]);
             const auto& c = mathChannels_[mi].color;
             uint8_t r = static_cast<uint8_t>(c.x * 255);
             uint8_t g = static_cast<uint8_t>(c.y * 255);
             uint8_t b = static_cast<uint8_t>(c.z * 255);
-            styles.push_back({IM_COL32(r, g, b, 220), IM_COL32(r, g, b, 35)});
+            stylesScratch_.push_back({IM_COL32(r, g, b, 220), IM_COL32(r, g, b, 35)});
         }
     }
 
-    specDisplay_.updatePeakHold(allSpectra);
-    specDisplay_.draw(allSpectra, styles, minDB_, maxDB_,
+    specDisplay_.updatePeakHold(allSpectraScratch_);
+    specDisplay_.draw(allSpectraScratch_, stylesScratch_, minDB_, maxDB_,
                       settings_.sampleRate, settings_.isIQ, freqScale_,
                       specPosX_, specPosY_, specSizeX_, specSizeY_,
                       viewLo_, viewHi_);

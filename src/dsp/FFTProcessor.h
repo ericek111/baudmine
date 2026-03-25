@@ -50,6 +50,9 @@ private:
     fftwf_plan     cplxPlan_ = nullptr;
 
     void destroyPlans();
+
+    // Scratch buffer for convenience overloads (avoids per-call allocation).
+    std::vector<std::complex<float>> scratchCplx_;
 };
 
 } // namespace baudline
