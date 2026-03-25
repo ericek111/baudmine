@@ -648,13 +648,26 @@ void Application::renderControlPanel() {
                 specDisplay_.clearPeakHold();
         }
 
-        if (viewLo_ > 0.0f || viewHi_ < 1.0f) {
-            float zoomPct = 1.0f / (viewHi_ - viewLo_);
-            ImGui::Text("Zoom: %.1fx", zoomPct);
+        {
+            float span = viewHi_ - viewLo_;
+            float zoomX = 1.0f / span;
+            float resetBtnW = ImGui::CalcTextSize("Reset").x + ImGui::GetStyle().FramePadding.x * 2;
+            float zoomLabelW = ImGui::CalcTextSize("Zoom:").x + ImGui::GetStyle().ItemSpacing.x;
+            float sliderW = ImGui::GetContentRegionAvail().x - zoomLabelW - resetBtnW - ImGui::GetStyle().ItemSpacing.x;
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("Zoom:");
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(sliderW);
+            if (ImGui::SliderFloat("##zoom", &zoomX, 1.0f, 200.0f, "%.1fx", ImGuiSliderFlags_Logarithmic)) {
+                zoomX = std::clamp(zoomX, 1.0f, 1000.0f);
+                float newSpan = 1.0f / zoomX;
+                viewLo_ = 0.0f;
+                viewHi_ = std::clamp(newSpan, 0.0f, 1.0f);
+            }
             ImGui::SameLine();
             if (ImGui::SmallButton("Reset##zoom")) {
                 viewLo_ = 0.0f;
-                viewHi_ = 1.0f;
+                viewHi_ = 0.5f;
             }
         }
     }
