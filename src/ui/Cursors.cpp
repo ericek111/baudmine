@@ -61,7 +61,8 @@ void Cursors::draw(const SpectrumDisplay& specDisplay,
                    float viewLo, float viewHi) const {
     ImDrawList* dl = ImGui::GetWindowDrawList();
 
-    auto drawCursor = [&](const CursorInfo& c, float dispDB, ImU32 color, const char* label) {
+    // Draw cursor lines and crosshairs (no labels here).
+    auto drawCursorMarker = [&](const CursorInfo& c, float dispDB, ImU32 color) {
         if (!c.active) return;
         float x = specDisplay.freqToScreenX(c.freq, posX, sizeX,
                                              sampleRate, isIQ, freqScale,
@@ -70,36 +71,53 @@ void Cursors::draw(const SpectrumDisplay& specDisplay,
         dbNorm = std::clamp(dbNorm, 0.0f, 1.0f);
         float y = posY + sizeY * (1.0f - dbNorm);
 
-        // Vertical line
         dl->AddLine({x, posY}, {x, posY + sizeY}, color, 1.0f);
-        // Horizontal line
         dl->AddLine({posX, y}, {posX + sizeX, y}, color & 0x80FFFFFF, 1.0f);
-        // Crosshair
         dl->AddCircle({x, y}, 5.0f, color, 12, 2.0f);
+    };
 
-        // Label
-        char buf[128];
-        if (std::abs(c.freq) >= 1e6)
-            std::snprintf(buf, sizeof(buf), "%s: %.6f MHz  %.1f dB",
-                          label, c.freq / 1e6, dispDB);
-        else if (std::abs(c.freq) >= 1e3)
-            std::snprintf(buf, sizeof(buf), "%s: %.3f kHz  %.1f dB",
-                          label, c.freq / 1e3, dispDB);
+    // Format a cursor label string.
+    auto formatLabel = [](char* buf, size_t sz, const char* label, double freq, float dB) {
+        if (std::abs(freq) >= 1e6)
+            std::snprintf(buf, sz, "%s: %.6f MHz  %.1f dB", label, freq / 1e6, dB);
+        else if (std::abs(freq) >= 1e3)
+            std::snprintf(buf, sz, "%s: %.3f kHz  %.1f dB", label, freq / 1e3, dB);
         else
-            std::snprintf(buf, sizeof(buf), "%s: %.1f Hz  %.1f dB",
-                          label, c.freq, dispDB);
+            std::snprintf(buf, sz, "%s: %.1f Hz  %.1f dB", label, freq, dB);
+    };
 
-        ImVec2 textSize = ImGui::CalcTextSize(buf);
-        float tx = std::min(x + 8, posX + sizeX - textSize.x - 4);
-        float ty = std::max(y - 18, posY + 2);
-        dl->AddRectFilled({tx - 2, ty - 1}, {tx + textSize.x + 2, ty + textSize.y + 1},
+    float aDB = avgDBA(), bDB = avgDBB();
+    drawCursorMarker(cursorA, aDB, IM_COL32(255, 255, 0, 220));
+    drawCursorMarker(cursorB, bDB, IM_COL32(0, 200, 255, 220));
+
+    // Draw labels at the top, touching the cursor's vertical line.
+    // If the label would overflow the right edge, flip it to the left side.
+    auto drawCursorLabel = [&](const CursorInfo& c, float dispDB, ImU32 color,
+                               const char* label, int row) {
+        if (!c.active) return;
+        float x = specDisplay.freqToScreenX(c.freq, posX, sizeX,
+                                             sampleRate, isIQ, freqScale,
+                                             viewLo, viewHi);
+        char buf[128];
+        formatLabel(buf, sizeof(buf), label, c.freq, dispDB);
+        ImVec2 sz = ImGui::CalcTextSize(buf);
+        float lineH = ImGui::GetTextLineHeight();
+        float ty = posY + 4 + row * (lineH + 4);
+
+        // Place right of cursor line; flip left if it would overflow.
+        float tx;
+        if (x + 6 + sz.x + 2 <= posX + sizeX)
+            tx = x + 6;
+        else
+            tx = x - 6 - sz.x;
+
+        dl->AddRectFilled({tx - 2, ty - 1}, {tx + sz.x + 2, ty + sz.y + 1},
                           IM_COL32(0, 0, 0, 180));
         dl->AddText({tx, ty}, color, buf);
     };
 
-    float aDB = avgDBA(), bDB = avgDBB();
-    drawCursor(cursorA, aDB, IM_COL32(255, 255, 0, 220), "A");
-    drawCursor(cursorB, bDB, IM_COL32(0, 200, 255, 220), "B");
+    drawCursorLabel(cursorA, aDB, IM_COL32(255, 255, 0, 220), "A", 0);
+    drawCursorLabel(cursorB, bDB, IM_COL32(0, 200, 255, 220), "B", cursorA.active ? 1 : 0);
 
     // Delta display (two lines, column-aligned on '=')
     if (showDelta && cursorA.active && cursorB.active) {
