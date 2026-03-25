@@ -123,7 +123,7 @@ void Cursors::draw(const SpectrumDisplay& specDisplay,
         fmtFreqDB(deltaBuf, sizeof(deltaBuf), "D", dFreq, dDB);
 
         ImVec2 dSz = ImGui::CalcTextSize(deltaBuf);
-        float tx = posX + sizeX - dSz.x - 178;
+        float tx = posX + sizeX - dSz.x - 168;
         float lineH = ImGui::GetTextLineHeight();
         float ty = posY + 4;
         ImU32 col = IM_COL32(255, 200, 100, 255);

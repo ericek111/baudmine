@@ -46,6 +46,7 @@ public:
     bool showOnWaterfall = false; // draw vertical lines on waterfall
 
 private:
+    PeakInfo globalPeak_;             // always-tracked highest peak
     std::vector<PeakInfo> peaks_;
 
     // Find top-N peaks with minimum bin separation.

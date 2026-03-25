@@ -63,6 +63,15 @@ void Measurements::findPeaks(const std::vector<float>& spectrumDB, int maxN,
 
 void Measurements::update(const std::vector<float>& spectrumDB,
                            double sampleRate, bool isIQ, int fftSize) {
+    // Always track global peak (for the readout label).
+    if (!spectrumDB.empty()) {
+        auto it = std::max_element(spectrumDB.begin(), spectrumDB.end());
+        int bin = static_cast<int>(std::distance(spectrumDB.begin(), it));
+        globalPeak_.bin = bin;
+        globalPeak_.dB = *it;
+        globalPeak_.freq = binToFreq(bin, sampleRate, isIQ, fftSize);
+    }
+
     if (!enabled) { peaks_.clear(); return; }
 
     findPeaks(spectrumDB, maxPeaks, minPeakDist, peakThreshold);
@@ -78,6 +87,16 @@ void Measurements::draw(const SpectrumDisplay& specDisplay,
                          double sampleRate, bool isIQ, FreqScale freqScale,
                          float minDB, float maxDB,
                          float viewLo, float viewHi) const {
+    // Global peak readout (always shown, left of cursor delta)
+    {
+        char pkBuf[128];
+        fmtFreqDB(pkBuf, sizeof(pkBuf), "Peak", globalPeak_.freq, globalPeak_.dB);
+        ImVec2 pkSz = ImGui::CalcTextSize(pkBuf);
+        float pkX = posX + sizeX - pkSz.x - 8 - 350;
+        float pkY = posY + 4;
+        ImGui::GetWindowDrawList()->AddText({pkX, pkY}, IM_COL32(180, 180, 200, 200), pkBuf);
+    }
+
     if (!enabled || !showOnSpectrum || peaks_.empty()) return;
 
     ImDrawList* dl = ImGui::GetWindowDrawList();

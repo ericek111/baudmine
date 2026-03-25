@@ -797,14 +797,6 @@ void Application::renderControlPanel() {
     ImGui::TextDisabled("Mode: %s", settings_.isIQ ? "I/Q"
                         : (settings_.numChannels > 1 ? "Multi-ch" : "Real"));
 
-    int pkCh2 = std::clamp(waterfallChannel_, 0, analyzer_.numSpectra() - 1);
-    auto [peakBin, peakDB] = analyzer_.findPeak(pkCh2);
-    double peakFreq = analyzer_.binToFreq(peakBin);
-    {
-        char peakBuf[128];
-        fmtFreqDB(peakBuf, sizeof(peakBuf), "Peak", peakFreq, peakDB);
-        ImGui::TextDisabled("%s", peakBuf);
-    }
 }
 
 void Application::renderSpectrumPanel() {
