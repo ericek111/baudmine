@@ -121,6 +121,9 @@ private:
     FreqScale freqScale_   = FreqScale::Linear;
     bool      paused_      = false;
     bool      vsync_       = true;
+    float     uiScale_     = 0.0f;  // 0 = auto (use DPI), >0 = manual override
+    float     appliedScale_ = 0.0f; // currently applied scale (0 = not yet applied)
+    void      applyUIScale(float scale);
     // (waterfallW_ removed — texture width tracks bin count automatically)
     // (waterfallH_ removed — fixed history depth of 1024 rows)
 

@@ -119,7 +119,9 @@ void Measurements::draw(const SpectrumDisplay& specDisplay,
         char pkBuf[128];
         fmtFreqDB(pkBuf, sizeof(pkBuf), "Peak", globalPeak_.freq, globalPeak_.dB);
         ImVec2 pkSz = ImGui::CalcTextSize(pkBuf);
-        float pkX = posX + sizeX - pkSz.x - 8 - 350;
+        // Reserve space for delta + hover labels to the right.
+        float reserveW = ImGui::CalcTextSize("D:  00.000 kHz  000.0 dB   00.000 kHz  000.0 dB").x;
+        float pkX = posX + sizeX - pkSz.x - 8 - reserveW;
         float pkY = posY + 4;
         ImGui::GetWindowDrawList()->AddText({pkX, pkY}, IM_COL32(180, 180, 200, 200), pkBuf);
     }

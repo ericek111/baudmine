@@ -48,12 +48,13 @@
     setStatus: function(text) {
       document.getElementById('status').textContent = text;
     },
-    // Auto-resize canvas to fill the window.
+    // Auto-resize canvas at full device resolution.
     preRun: [function() {
       function resize() {
         var canvas = document.getElementById('canvas');
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
+        var dpr = window.devicePixelRatio || 1;
+        canvas.width = Math.round(window.innerWidth * dpr);
+        canvas.height = Math.round(window.innerHeight * dpr);
       }
       resize();
       window.addEventListener('resize', resize);

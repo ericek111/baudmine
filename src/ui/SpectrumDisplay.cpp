@@ -127,7 +127,7 @@ void SpectrumDisplay::draw(const std::vector<std::vector<float>>& spectra,
             dl->AddLine({posX, y}, {posX + sizeX, y}, gridCol);
             char label[16];
             std::snprintf(label, sizeof(label), "%.0f", db);
-            dl->AddText({posX + 2, y - 12}, textCol, label);
+            dl->AddText({posX + 2, y - ImGui::GetTextLineHeight()}, textCol, label);
         }
 
         // ── Vertical (frequency) grid — adapt count to available width ──
@@ -148,7 +148,7 @@ void SpectrumDisplay::draw(const std::vector<std::vector<float>>& spectra,
                 std::snprintf(label, sizeof(label), "%.1fk", freq / 1e3);
             else
                 std::snprintf(label, sizeof(label), "%.0f", freq);
-            dl->AddText({x + 2, posY + sizeY - 14}, textCol, label);
+            dl->AddText({x + 2, posY + sizeY - ImGui::GetTextLineHeight()}, textCol, label);
         }
     }
 

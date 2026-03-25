@@ -123,7 +123,9 @@ void Cursors::draw(const SpectrumDisplay& specDisplay,
         fmtFreqDB(deltaBuf, sizeof(deltaBuf), "D", dFreq, dDB);
 
         ImVec2 dSz = ImGui::CalcTextSize(deltaBuf);
-        float tx = posX + sizeX - dSz.x - 168;
+        // Reserve space for hover label to the right.
+        float reserveW = ImGui::CalcTextSize("  00.000 kHz  000.0 dB").x;
+        float tx = posX + sizeX - dSz.x - reserveW;
         float lineH = ImGui::GetTextLineHeight();
         float ty = posY + 4;
         ImU32 col = IM_COL32(255, 200, 100, 255);

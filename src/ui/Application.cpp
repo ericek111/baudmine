@@ -22,6 +22,10 @@ EM_JS(int, js_isFullscreen, (), {
     return document.fullscreenElement ? 1 : 0;
 });
 
+EM_JS(float, js_devicePixelRatio, (), {
+    return window.devicePixelRatio || 1.0;
+});
+
 #else
 #include <GL/gl.h>
 #endif
@@ -33,6 +37,34 @@ EM_JS(int, js_isFullscreen, (), {
 namespace baudmine {
 
 Application::Application() = default;
+
+void Application::applyUIScale(float scale) {
+    scale = std::clamp(scale, 0.5f, 4.0f);
+    if (std::abs(scale - appliedScale_) < 0.01f) return;
+    appliedScale_ = scale;
+
+    // Snapshot the 1x base style once.
+    static ImGuiStyle baseStyle = [] {
+        ImGuiStyle s;
+        ImGui::StyleColorsDark(&s);
+        s.WindowRounding = 4.0f;
+        s.FrameRounding = 2.0f;
+        s.GrabRounding = 2.0f;
+        return s;
+    }();
+
+    ImGuiIO& io = ImGui::GetIO();
+    io.Fonts->Clear();
+    ImFontConfig fc;
+    fc.SizePixels = 13.0f * scale;
+    io.Fonts->AddFontDefault(&fc);
+    io.Fonts->Build();
+    ImGui_ImplOpenGL3_DestroyFontsTexture();
+
+    // Restore base style, then scale from 1x.
+    ImGui::GetStyle() = baseStyle;
+    ImGui::GetStyle().ScaleAllSizes(scale);
+}
 
 Application::~Application() {
     shutdown();
@@ -111,6 +143,20 @@ bool Application::init(int argc, char** argv) {
 
     // Load saved config (overwrites defaults for FFT size, overlap, window, etc.)
     loadConfig();
+
+    // Apply DPI-aware UI scaling
+    {
+        float dpiScale = 1.0f;
+#ifdef __EMSCRIPTEN__
+        dpiScale = js_devicePixelRatio();
+#else
+        float ddpi = 0;
+        if (SDL_GetDisplayDPI(0, &ddpi, nullptr, nullptr) == 0 && ddpi > 0)
+            dpiScale = ddpi / 96.0f;
+#endif
+        float scale = (uiScale_ > 0.0f) ? uiScale_ : dpiScale;
+        applyUIScale(scale);
+    }
 
     // Apply loaded settings
     settings_.fftSize    = kFFTSizes[fftSizeIdx_];
@@ -370,6 +416,34 @@ void Application::render() {
                 saveConfig();
             }
 
+            if (ImGui::BeginMenu("UI scale")) {
+                static constexpr int kScales[] = {100, 150, 175, 200, 225, 250, 300};
+                int curPct = static_cast<int>(appliedScale_ * 100.0f + 0.5f);
+                if (ImGui::MenuItem("Auto", nullptr, uiScale_ == 0.0f)) {
+                    uiScale_ = 0.0f;
+                    float dpiScale = 1.0f;
+#ifdef __EMSCRIPTEN__
+                    dpiScale = js_devicePixelRatio();
+#else
+                    float ddpi = 0;
+                    if (SDL_GetDisplayDPI(0, &ddpi, nullptr, nullptr) == 0 && ddpi > 0)
+                        dpiScale = ddpi / 96.0f;
+#endif
+                    applyUIScale(dpiScale);
+                    saveConfig();
+                }
+                for (int s : kScales) {
+                    char label[16];
+                    std::snprintf(label, sizeof(label), "%d%%", s);
+                    if (ImGui::MenuItem(label, nullptr, uiScale_ > 0.0f && std::abs(curPct - s) <= 2)) {
+                        uiScale_ = s / 100.0f;
+                        applyUIScale(uiScale_);
+                        saveConfig();
+                    }
+                }
+                ImGui::EndMenu();
+            }
+
             ImGui::EndMenu();
         }
 
@@ -409,7 +483,7 @@ void Application::render() {
     // Layout
     float totalW = ImGui::GetContentRegionAvail().x;
     float contentH = ImGui::GetContentRegionAvail().y;
-    float controlW = showSidebar_ ? 270.0f : 0.0f;
+    float controlW = showSidebar_ ? 270.0f * appliedScale_ : 0.0f;
     float contentW = totalW - (showSidebar_ ? controlW + 8 : 0);
 
     // Control panel (sidebar)
@@ -686,6 +760,7 @@ void Application::renderControlPanel() {
             }
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Reset to 2x zoom");
         }
+
     }
 
     // ── Channels ──
@@ -695,7 +770,7 @@ void Application::renderControlPanel() {
         bool isMulti = waterfallMultiCh_ && nCh > 1;
 
         // Header with inline Single/Multi toggle
-        float widgetW = (nCh > 1) ? 60.0f : 0.0f;
+        float widgetW = (nCh > 1) ? ImGui::CalcTextSize(" Multi ").x + ImGui::GetStyle().FramePadding.x * 2 : 0.0f;
         float gap = ImGui::GetStyle().ItemSpacing.x * 0.25f;
         ImVec2 hdrMin = ImGui::GetCursorScreenPos();
         float winLeft = ImGui::GetWindowPos().x;
@@ -1536,6 +1611,7 @@ void Application::loadConfig() {
     int fs        = config_.getInt("freq_scale", static_cast<int>(freqScale_));
     freqScale_    = static_cast<FreqScale>(fs);
     vsync_        = config_.getBool("vsync", vsync_);
+    uiScale_      = config_.getFloat("ui_scale", uiScale_);
     spectrumFrac_ = config_.getFloat("spectrum_frac", spectrumFrac_);
     showSidebar_  = config_.getBool("show_sidebar", showSidebar_);
     specDisplay_.peakHoldEnable = config_.getBool("peak_hold", specDisplay_.peakHoldEnable);
@@ -1579,6 +1655,7 @@ void Application::saveConfig() const {
     cfg.setFloat("max_db", maxDB_);
     cfg.setInt("freq_scale", static_cast<int>(freqScale_));
     cfg.setBool("vsync", vsync_);
+    cfg.setFloat("ui_scale", uiScale_);
     cfg.setFloat("spectrum_frac", spectrumFrac_);
     cfg.setBool("show_sidebar", showSidebar_);
     cfg.setBool("peak_hold", specDisplay_.peakHoldEnable);
