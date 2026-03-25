@@ -1128,7 +1128,7 @@ void Application::openPortAudio() {
     auto src = std::make_unique<MiniAudioSource>(sr, reqCh, deviceIdx);
     if (src->open()) {
         audioSource_ = std::move(src);
-        settings_.sampleRate = sr;
+        settings_.sampleRate = audioSource_->sampleRate();
         settings_.isIQ = false;
         settings_.numChannels = audioSource_->channels();
     } else {

@@ -43,13 +43,16 @@ std::vector<MiniAudioSource::DeviceInfo> MiniAudioSource::listInputDevices() {
             fullInfo = captureDevices[i];
         }
 
-        int maxCh = static_cast<int>(fullInfo.nativeDataFormatCount > 0
-                        ? fullInfo.nativeDataFormats[0].channels : 2);
-        // Find max channels across native formats.
-        for (ma_uint32 f = 1; f < fullInfo.nativeDataFormatCount; ++f) {
-            int ch = static_cast<int>(fullInfo.nativeDataFormats[f].channels);
-            if (ch > maxCh) maxCh = ch;
+        int maxCh = 0;
+        if (fullInfo.nativeDataFormatCount > 0) {
+            for (ma_uint32 f = 0; f < fullInfo.nativeDataFormatCount; ++f) {
+                int ch = static_cast<int>(fullInfo.nativeDataFormats[f].channels);
+                if (ch > maxCh) maxCh = ch;
+            }
         }
+        // channels == 0 means "any" in miniaudio (e.g. Web Audio backend).
+        // Default to 2 (stereo) so the UI can offer multi-channel mode.
+        if (maxCh <= 0) maxCh = 2;
 
         double defaultSR = 48000.0;
         if (fullInfo.nativeDataFormatCount > 0 && fullInfo.nativeDataFormats[0].sampleRate > 0)
@@ -130,6 +133,15 @@ bool MiniAudioSource::open() {
         device_.reset();
         return false;
     }
+
+    // Read back actual device parameters (the backend may give us fewer
+    // channels than requested, e.g. Web Audio defaults to mono).
+    channels_   = static_cast<int>(device_->capture.channels);
+    sampleRate_ = static_cast<double>(device_->sampleRate);
+
+    // Rebuild ring buffer to match actual channel count.
+    size_t ringSize = static_cast<size_t>(sampleRate_ * channels_ * 2);
+    ringBuf_ = std::make_unique<RingBuffer<float>>(ringSize);
 
     if (ma_device_start(device_.get()) != MA_SUCCESS) {
         std::fprintf(stderr, "miniaudio: failed to start device\n");
