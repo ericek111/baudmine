@@ -205,11 +205,13 @@ private:
     // UI visibility
     bool showSidebar_       = true;
 
+#ifndef IMGUI_DISABLE_DEBUG_TOOLS
     // ImGui debug windows
     bool showDemoWindow_    = false;
     bool showMetricsWindow_ = false;
     bool showDebugLog_      = false;
     bool showStackTool_     = false;
+#endif
 
     // Pre-allocated scratch buffers (avoid per-frame heap allocations)
     std::vector<std::vector<float>>  wfSpectraScratch_;

@@ -447,6 +447,7 @@ void Application::render() {
             ImGui::EndMenu();
         }
 
+#ifndef IMGUI_DISABLE_DEBUG_TOOLS
         if (ImGui::BeginMenu("Debug")) {
             ImGui::MenuItem("Metrics/Debugger", nullptr, &showMetricsWindow_);
             ImGui::MenuItem("Debug Log", nullptr, &showDebugLog_);
@@ -457,6 +458,7 @@ void Application::render() {
                         1000.0f / ImGui::GetIO().Framerate);
             ImGui::EndMenu();
         }
+#endif
 
 #ifdef __EMSCRIPTEN__
         if (ImGui::SmallButton(js_isFullscreen() ? "Exit Fullscreen" : "Fullscreen")) {
@@ -584,11 +586,13 @@ void Application::render() {
 
     ImGui::End();
 
+#ifndef IMGUI_DISABLE_DEBUG_TOOLS
     // ImGui debug windows
     if (showDemoWindow_)    ImGui::ShowDemoWindow(&showDemoWindow_);
     if (showMetricsWindow_) ImGui::ShowMetricsWindow(&showMetricsWindow_);
     if (showDebugLog_)      ImGui::ShowDebugLogWindow(&showDebugLog_);
     if (showStackTool_)     ImGui::ShowIDStackToolWindow(&showStackTool_);
+#endif
 
     // Render
     ImGui::Render();

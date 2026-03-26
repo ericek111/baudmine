@@ -20,15 +20,18 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(imgui)
 
-add_library(imgui STATIC
+set(IMGUI_SOURCES
     ${imgui_SOURCE_DIR}/imgui.cpp
-    ${imgui_SOURCE_DIR}/imgui_demo.cpp
     ${imgui_SOURCE_DIR}/imgui_draw.cpp
     ${imgui_SOURCE_DIR}/imgui_tables.cpp
     ${imgui_SOURCE_DIR}/imgui_widgets.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl2.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
 )
+if(NOT EMSCRIPTEN)
+    list(APPEND IMGUI_SOURCES ${imgui_SOURCE_DIR}/imgui_demo.cpp)
+endif()
+add_library(imgui STATIC ${IMGUI_SOURCES})
 target_include_directories(imgui PUBLIC
     ${imgui_SOURCE_DIR}
     ${imgui_SOURCE_DIR}/backends
@@ -141,9 +144,10 @@ if(EMSCRIPTEN)
     target_compile_definitions(fftw3f_wasm PRIVATE FFTW_SINGLE=1)
     target_compile_options(fftw3f_wasm PRIVATE -w)  # suppress warnings from FFTW
 
-    # ImGui: link with Emscripten SDL2 port
+    # ImGui: link with Emscripten SDL2 port, disable demo/debug tools
     target_compile_options(imgui PUBLIC -sUSE_SDL=2)
     target_link_options(imgui PUBLIC -sUSE_SDL=2)
+    target_compile_definitions(imgui PUBLIC IMGUI_DISABLE_DEMO_WINDOWS=1 IMGUI_DISABLE_DEBUG_TOOLS=1)
 
     add_executable(baudmine ${SOURCES})
     target_include_directories(baudmine PRIVATE src)
