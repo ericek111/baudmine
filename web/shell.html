@@ -48,17 +48,9 @@
     setStatus: function(text) {
       document.getElementById('status').textContent = text;
     },
-    // Auto-resize canvas at full device resolution.
-    preRun: [function() {
-      function resize() {
-        var canvas = document.getElementById('canvas');
-        var dpr = window.devicePixelRatio || 1;
-        canvas.width = Math.round(window.innerWidth * dpr);
-        canvas.height = Math.round(window.innerHeight * dpr);
-      }
-      resize();
-      window.addEventListener('resize', resize);
-    }]
+    // Canvas backing-store sizing is handled in C++ via syncCanvasSize()
+    // each frame, so no JS resize handler is needed.
+    preRun: []
   };
 </script>
 {{{ SCRIPT }}}

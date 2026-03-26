@@ -26,6 +26,13 @@ EM_JS(float, js_devicePixelRatio, (), {
     return window.devicePixelRatio || 1.0;
 });
 
+// SDL_CreateWindow sets inline width/height on the canvas which overrides
+// the stylesheet's 100vw/100vh.  Clear them once so CSS stays in control.
+EM_JS(void, js_clearCanvasInlineSize, (), {
+    var c = document.getElementById('canvas');
+    if (c) { c.style.width = ''; c.style.height = ''; }
+});
+
 #else
 #include <GL/gl.h>
 #endif
@@ -37,6 +44,30 @@ EM_JS(float, js_devicePixelRatio, (), {
 namespace baudmine {
 
 Application::Application() = default;
+
+void Application::syncCanvasSize() {
+#ifdef __EMSCRIPTEN__
+    double cssW, cssH;
+    emscripten_get_element_css_size("#canvas", &cssW, &cssH);
+    float dpr = js_devicePixelRatio();
+    int targetW = static_cast<int>(cssW * dpr + 0.5);
+    int targetH = static_cast<int>(cssH * dpr + 0.5);
+    int curW, curH;
+    emscripten_get_canvas_element_size("#canvas", &curW, &curH);
+    if (curW != targetW || curH != targetH) {
+        // Set backing store + viewport to physical pixels.
+        // CSS display size is handled by the stylesheet (100vw × 100vh).
+        emscripten_set_canvas_element_size("#canvas", targetW, targetH);
+        glViewport(0, 0, targetW, targetH);
+    }
+    // Re-apply UI scale if devicePixelRatio changed (orientation, zoom, etc.)
+    if (std::abs(dpr - lastDpr_) > 0.01f) {
+        lastDpr_ = dpr;
+        float scale = (uiScale_ > 0.0f) ? uiScale_ : dpr;
+        applyUIScale(scale);
+    }
+#endif
+}
 
 void Application::applyUIScale(float scale) {
     scale = std::clamp(scale, 0.5f, 4.0f);
@@ -53,17 +84,35 @@ void Application::applyUIScale(float scale) {
         return s;
     }();
 
+    // Determine framebuffer scale (e.g. 2x–3x on HiDPI phones).
+    float fbScale = 1.0f;
+    int winW, winH, drawW, drawH;
+    SDL_GetWindowSize(window_, &winW, &winH);
+    SDL_GL_GetDrawableSize(window_, &drawW, &drawH);
+    if (winW > 0) fbScale = static_cast<float>(drawW) / winW;
+
+    logicalScale_ = scale / fbScale;
+
     ImGuiIO& io = ImGui::GetIO();
+
+    // Rasterize the font at full physical resolution so the atlas has
+    // crisp glyphs, then tell ImGui to scale them back to logical size.
+    // Without this the 13px atlas gets bilinear-stretched to 13*dpr px.
     io.Fonts->Clear();
     ImFontConfig fc;
-    fc.SizePixels = 13.0f * scale;
+    fc.SizePixels = std::max(8.0f, 13.0f * scale);   // physical pixels
     io.Fonts->AddFontDefault(&fc);
     io.Fonts->Build();
     ImGui_ImplOpenGL3_DestroyFontsTexture();
+    io.FontGlobalScale = 1.0f / fbScale;              // display at logical size
 
     // Restore base style, then scale from 1x.
     ImGui::GetStyle() = baseStyle;
-    ImGui::GetStyle().ScaleAllSizes(scale);
+    ImGui::GetStyle().ScaleAllSizes(logicalScale_);
+}
+
+void Application::requestUIScale(float scale) {
+    pendingScale_ = scale;
 }
 
 Application::~Application() {
@@ -115,6 +164,13 @@ bool Application::init(int argc, char** argv) {
         return false;
     }
 
+#ifdef __EMSCRIPTEN__
+    // SDL_CreateWindow sets inline width/height on the canvas element,
+    // overriding the stylesheet's 100vw/100vh.  Clear them so CSS stays
+    // in control of display size while we manage the backing store.
+    js_clearCanvasInlineSize();
+#endif
+
     glContext_ = SDL_GL_CreateContext(window_);
     SDL_GL_MakeCurrent(window_, glContext_);
     SDL_GL_SetSwapInterval(1); // vsync
@@ -144,11 +200,15 @@ bool Application::init(int argc, char** argv) {
     // Load saved config (overwrites defaults for FFT size, overlap, window, etc.)
     loadConfig();
 
+    // Sync canvas to physical pixels before first frame (WASM)
+    syncCanvasSize();
+
     // Apply DPI-aware UI scaling
     {
         float dpiScale = 1.0f;
 #ifdef __EMSCRIPTEN__
         dpiScale = js_devicePixelRatio();
+        lastDpr_ = dpiScale;
 #else
         float ddpi = 0;
         if (SDL_GetDisplayDPI(0, &ddpi, nullptr, nullptr) == 0 && ddpi > 0)
@@ -186,6 +246,14 @@ bool Application::init(int argc, char** argv) {
 }
 
 void Application::mainLoopStep() {
+    syncCanvasSize();
+
+    // Apply deferred UI scale (must happen outside the ImGui frame).
+    if (pendingScale_ > 0.0f) {
+        applyUIScale(pendingScale_);
+        pendingScale_ = 0.0f;
+    }
+
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         ImGui_ImplSDL2_ProcessEvent(&event);
@@ -429,7 +497,7 @@ void Application::render() {
                     if (SDL_GetDisplayDPI(0, &ddpi, nullptr, nullptr) == 0 && ddpi > 0)
                         dpiScale = ddpi / 96.0f;
 #endif
-                    applyUIScale(dpiScale);
+                    requestUIScale(dpiScale);
                     saveConfig();
                 }
                 for (int s : kScales) {
@@ -437,7 +505,7 @@ void Application::render() {
                     std::snprintf(label, sizeof(label), "%d%%", s);
                     if (ImGui::MenuItem(label, nullptr, uiScale_ > 0.0f && std::abs(curPct - s) <= 2)) {
                         uiScale_ = s / 100.0f;
-                        applyUIScale(uiScale_);
+                        requestUIScale(uiScale_);
                         saveConfig();
                     }
                 }
@@ -485,7 +553,7 @@ void Application::render() {
     // Layout
     float totalW = ImGui::GetContentRegionAvail().x;
     float contentH = ImGui::GetContentRegionAvail().y;
-    float controlW = showSidebar_ ? 270.0f * appliedScale_ : 0.0f;
+    float controlW = showSidebar_ ? 270.0f * logicalScale_ : 0.0f;
     float contentW = totalW - (showSidebar_ ? controlW + 8 : 0);
 
     // Control panel (sidebar)

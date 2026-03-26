@@ -121,9 +121,14 @@ private:
     FreqScale freqScale_   = FreqScale::Linear;
     bool      paused_      = false;
     bool      vsync_       = true;
-    float     uiScale_     = 0.0f;  // 0 = auto (use DPI), >0 = manual override
-    float     appliedScale_ = 0.0f; // currently applied scale (0 = not yet applied)
+    float     uiScale_       = 0.0f;  // 0 = auto (use DPI), >0 = manual override
+    float     appliedScale_  = 0.0f; // currently applied user-facing scale
+    float     pendingScale_  = 0.0f; // deferred scale (applied before next frame)
+    float     logicalScale_  = 1.0f; // scale after compensating for framebuffer DPI
+    float     lastDpr_       = 0.0f; // last devicePixelRatio (to detect changes)
     void      applyUIScale(float scale);
+    void      requestUIScale(float scale); // safe to call mid-frame
+    void      syncCanvasSize();
     // (waterfallW_ removed — texture width tracks bin count automatically)
     // (waterfallH_ removed — fixed history depth of 1024 rows)
 
