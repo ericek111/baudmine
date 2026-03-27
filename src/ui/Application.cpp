@@ -268,8 +268,8 @@ void Application::mainLoopStep() {
             if (key == SDLK_SPACE)  paused_ = !paused_;
             if (key == SDLK_p) {
                 int pkCh = std::clamp(waterfallChannel_, 0,
-                                      analyzer_.numSpectra() - 1);
-                cursors_.snapToPeak(analyzer_.channelSpectrum(pkCh),
+                                      totalNumSpectra() - 1);
+                cursors_.snapToPeak(getSpectrum(pkCh),
                                     settings_.sampleRate, settings_.isIQ,
                                     settings_.fftSize);
             }
@@ -334,6 +334,7 @@ void Application::processAudio() {
     constexpr int kMaxSpectraPerFrame = 8;
     int spectraThisFrame = 0;
 
+    // Process primary source.
     while (spectraThisFrame < kMaxSpectraPerFrame) {
         size_t framesRead = audioSource_->read(audioBuf_.data(), framesToRead);
         if (framesRead == 0) break;
@@ -341,41 +342,62 @@ void Application::processAudio() {
         analyzer_.pushSamples(audioBuf_.data(), framesRead);
 
         if (analyzer_.hasNewSpectrum()) {
-            computeMathChannels();
-
-            int nSpec = analyzer_.numSpectra();
-            if (waterfallMultiCh_ && nSpec > 1) {
-                // Multi-channel overlay waterfall: physical + math channels.
-                wfSpectraScratch_.clear();
-                wfChInfoScratch_.clear();
-
-                for (int ch = 0; ch < nSpec; ++ch) {
-                    const auto& c = channelColors_[ch % kMaxChannels];
-                    wfSpectraScratch_.push_back(analyzer_.channelSpectrum(ch));
-                    wfChInfoScratch_.push_back({c.x, c.y, c.z,
-                                        channelEnabled_[ch % kMaxChannels]});
-                }
-                for (size_t mi = 0; mi < mathChannels_.size(); ++mi) {
-                    if (mathChannels_[mi].enabled && mathChannels_[mi].waterfall &&
-                        mi < mathSpectra_.size()) {
-                        const auto& c = mathChannels_[mi].color;
-                        wfSpectraScratch_.push_back(mathSpectra_[mi]);
-                        wfChInfoScratch_.push_back({c.x, c.y, c.z, true});
-                    }
-                }
-                waterfall_.pushLineMulti(wfSpectraScratch_, wfChInfoScratch_, minDB_, maxDB_);
-            } else {
-                int wfCh = std::clamp(waterfallChannel_, 0, nSpec - 1);
-                waterfall_.pushLine(analyzer_.channelSpectrum(wfCh),
-                                    minDB_, maxDB_);
-            }
-            int curCh = std::clamp(waterfallChannel_, 0, nSpec - 1);
-            cursors_.update(analyzer_.channelSpectrum(curCh),
-                           settings_.sampleRate, settings_.isIQ, settings_.fftSize);
-            measurements_.update(analyzer_.channelSpectrum(curCh),
-                                 settings_.sampleRate, settings_.isIQ, settings_.fftSize);
             ++spectraThisFrame;
         }
+    }
+
+    // Process extra devices independently (each at its own pace).
+    for (auto& ed : extraDevices_) {
+        int edCh = ed->source->channels();
+        const auto& edSettings = ed->analyzer.settings();
+        size_t edHop = static_cast<size_t>(edSettings.fftSize * (1.0f - edSettings.overlap));
+        if (edHop < 1) edHop = 1;
+        ed->audioBuf.resize(edHop * edCh);
+
+        int edSpectra = 0;
+        while (edSpectra < kMaxSpectraPerFrame) {
+            size_t framesRead = ed->source->read(ed->audioBuf.data(), edHop);
+            if (framesRead == 0) break;
+            ed->analyzer.pushSamples(ed->audioBuf.data(), framesRead);
+            if (ed->analyzer.hasNewSpectrum())
+                ++edSpectra;
+        }
+    }
+
+    // Update waterfall / cursors / math using unified channel view.
+    // Only advance when the primary analyzer produced a spectrum (controls scroll rate).
+    if (spectraThisFrame > 0) {
+        computeMathChannels();
+
+        int nSpec = totalNumSpectra();
+        if (waterfallMultiCh_ && nSpec > 1) {
+            wfSpectraScratch_.clear();
+            wfChInfoScratch_.clear();
+
+            for (int ch = 0; ch < nSpec; ++ch) {
+                const auto& c = channelColors_[ch % kMaxChannels];
+                wfSpectraScratch_.push_back(getSpectrum(ch));
+                wfChInfoScratch_.push_back({c.x, c.y, c.z,
+                                    channelEnabled_[ch % kMaxChannels]});
+            }
+            for (size_t mi = 0; mi < mathChannels_.size(); ++mi) {
+                if (mathChannels_[mi].enabled && mathChannels_[mi].waterfall &&
+                    mi < mathSpectra_.size()) {
+                    const auto& c = mathChannels_[mi].color;
+                    wfSpectraScratch_.push_back(mathSpectra_[mi]);
+                    wfChInfoScratch_.push_back({c.x, c.y, c.z, true});
+                }
+            }
+            waterfall_.pushLineMulti(wfSpectraScratch_, wfChInfoScratch_, minDB_, maxDB_);
+        } else {
+            int wfCh = std::clamp(waterfallChannel_, 0, nSpec - 1);
+            waterfall_.pushLine(getSpectrum(wfCh), minDB_, maxDB_);
+        }
+        int curCh = std::clamp(waterfallChannel_, 0, nSpec - 1);
+        cursors_.update(getSpectrum(curCh),
+                       settings_.sampleRate, settings_.isIQ, settings_.fftSize);
+        measurements_.update(getSpectrum(curCh),
+                             settings_.sampleRate, settings_.isIQ, settings_.fftSize);
     }
 
     if (audioSource_->isEOF() && !audioSource_->isRealTime()) {
@@ -453,19 +475,52 @@ void Application::render() {
 
             // ── Audio device ──
             if (!paDevices_.empty()) {
-                ImGui::Text("Audio Device");
-                std::vector<const char*> devNames;
-                for (auto& d : paDevices_) devNames.push_back(d.name.c_str());
-                ImGui::SetNextItemWidth(250);
-                if (ImGui::Combo("##device", &paDeviceIdx_, devNames.data(),
-                                 static_cast<int>(devNames.size()))) {
-                    openPortAudio();
-                    updateAnalyzerSettings();
-                    saveConfig();
+                if (ImGui::Checkbox("Multi-Device", &multiDeviceMode_)) {
+                    // Switching modes: clear multi-select, re-open
+                    std::memset(paDeviceSelected_, 0, sizeof(paDeviceSelected_));
+                    if (!multiDeviceMode_) {
+                        openPortAudio();
+                        updateAnalyzerSettings();
+                        saveConfig();
+                    }
+                }
+
+                if (multiDeviceMode_) {
+                    // Multi-device: checkboxes, each selected device = one channel.
+                    ImGui::Text("Select devices (each = 1 channel):");
+                    int maxDevs = std::min(static_cast<int>(paDevices_.size()), kMaxChannels);
+                    bool changed = false;
+                    for (int i = 0; i < maxDevs; ++i) {
+                        if (ImGui::Checkbox(
+                                (paDevices_[i].name + "##mdev" + std::to_string(i)).c_str(),
+                                &paDeviceSelected_[i])) {
+                            changed = true;
+                        }
+                    }
+                    if (changed) {
+                        openMultiDevice();
+                        updateAnalyzerSettings();
+                        saveConfig();
+                    }
+                } else {
+                    // Single-device mode: combo selector.
+                    ImGui::Text("Audio Device");
+                    std::vector<const char*> devNames;
+                    for (auto& d : paDevices_) devNames.push_back(d.name.c_str());
+                    ImGui::SetNextItemWidth(250);
+                    if (ImGui::Combo("##device", &paDeviceIdx_, devNames.data(),
+                                     static_cast<int>(devNames.size()))) {
+                        openPortAudio();
+                        updateAnalyzerSettings();
+                        saveConfig();
+                    }
                 }
             }
             if (ImGui::MenuItem("Open Audio Device")) {
-                openPortAudio();
+                if (multiDeviceMode_)
+                    openMultiDevice();
+                else
+                    openPortAudio();
                 updateAnalyzerSettings();
             }
 
@@ -679,12 +734,14 @@ void Application::renderControlPanel() {
     if (ImGui::Button(paused_ ? "Resume" : "Pause", {btnW, 0}))
         paused_ = !paused_;
     ImGui::SameLine();
-    if (ImGui::Button("Clear", {btnW, 0}))
+    if (ImGui::Button("Clear", {btnW, 0})) {
         analyzer_.clearHistory();
+        for (auto& ed : extraDevices_) ed->analyzer.clearHistory();
+    }
     ImGui::SameLine();
     if (ImGui::Button("Peak", {btnW, 0})) {
-        int pkCh = std::clamp(waterfallChannel_, 0, analyzer_.numSpectra() - 1);
-        cursors_.snapToPeak(analyzer_.channelSpectrum(pkCh),
+        int pkCh = std::clamp(waterfallChannel_, 0, totalNumSpectra() - 1);
+        cursors_.snapToPeak(getSpectrum(pkCh),
                             settings_.sampleRate, settings_.isIQ,
                             settings_.fftSize);
     }
@@ -838,7 +895,7 @@ void Application::renderControlPanel() {
     // ── Channels ──
     ImGui::Spacing();
     {
-        int nCh = analyzer_.numSpectra();
+        int nCh = totalNumSpectra();
         bool isMulti = waterfallMultiCh_ && nCh > 1;
 
         // Header with inline Single/Multi toggle
@@ -874,6 +931,8 @@ void Application::renderControlPanel() {
                     ImGui::SameLine();
                     ImGui::ColorEdit3(defaultNames[ch], &channelColors_[ch].x,
                                       ImGuiColorEditFlags_NoInputs);
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("%s", getDeviceName(ch));
                     ImGui::PopID();
                 }
             } else {
@@ -916,7 +975,7 @@ void Application::renderControlPanel() {
         ImGui::SameLine();
         ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - btnW + ImGui::GetStyle().FramePadding.x);
         if (ImGui::Button("+##addmath", {btnW, 0})) {
-            int nPhys = analyzer_.numSpectra();
+            int nPhys = totalNumSpectra();
             MathChannel mc;
             mc.op = MathOp::Subtract;
             mc.sourceX = 0;
@@ -1009,15 +1068,16 @@ void Application::renderSpectrumPanel() {
     specSizeY_ = specH;
 
     // Build per-channel styles and combine physical + math spectra.
-    int nPhys = analyzer_.numSpectra();
+    int nPhys = totalNumSpectra();
     int nMath = static_cast<int>(mathSpectra_.size());
 
     allSpectraScratch_.clear();
     stylesScratch_.clear();
 
-    // Physical channels.
+    // Physical channels (skip disabled ones).
     for (int ch = 0; ch < nPhys; ++ch) {
-        allSpectraScratch_.push_back(analyzer_.channelSpectrum(ch));
+        if (!channelEnabled_[ch % kMaxChannels]) continue;
+        allSpectraScratch_.push_back(getSpectrum(ch));
         const auto& c = channelColors_[ch % kMaxChannels];
         uint8_t r = static_cast<uint8_t>(c.x * 255);
         uint8_t g = static_cast<uint8_t>(c.y * 255);
@@ -1219,8 +1279,8 @@ void Application::renderWaterfallPanel() {
             double secondsPerLine = static_cast<double>(hopSamples) / settings_.sampleRate;
             hoverWfTimeOffset_ = static_cast<float>(yFrac * screenRows * secondsPerLine);
 
-            int curCh = std::clamp(waterfallChannel_, 0, analyzer_.numSpectra() - 1);
-            const auto& spec = analyzer_.channelSpectrum(curCh);
+            int curCh = std::clamp(waterfallChannel_, 0, totalNumSpectra() - 1);
+            const auto& spec = getSpectrum(curCh);
             if (!spec.empty()) {
                 cursors_.hover = {true, freq, spec[bin], bin};
             }
@@ -1364,8 +1424,8 @@ void Application::handleSpectrumInput(float posX, float posY,
         int bin = static_cast<int>((freq - freqMin) / (freqMax - freqMin) * (bins - 1));
         bin = std::clamp(bin, 0, bins - 1);
 
-        int curCh = std::clamp(waterfallChannel_, 0, analyzer_.numSpectra() - 1);
-        const auto& spec = analyzer_.channelSpectrum(curCh);
+        int curCh = std::clamp(waterfallChannel_, 0, totalNumSpectra() - 1);
+        const auto& spec = getSpectrum(curCh);
         if (!spec.empty()) {
             dB = spec[bin];
             cursors_.hover = {true, freq, dB, bin};
@@ -1444,6 +1504,7 @@ void Application::handleSpectrumInput(float posX, float posY,
 
 void Application::openPortAudio() {
     if (audioSource_) audioSource_->close();
+    extraDevices_.clear();
 
     int deviceIdx = -1;
     double sr = 48000.0;
@@ -1468,8 +1529,131 @@ void Application::openPortAudio() {
     }
 }
 
+void Application::openMultiDevice() {
+    if (audioSource_) audioSource_->close();
+    extraDevices_.clear();
+
+    // Collect selected device indices.
+    std::vector<int> selected;
+    int maxDevs = std::min(static_cast<int>(paDevices_.size()), kMaxChannels);
+    for (int i = 0; i < maxDevs; ++i) {
+        if (paDeviceSelected_[i])
+            selected.push_back(i);
+    }
+    if (selected.empty()) return;
+
+    // First selected device becomes the primary source.
+    {
+        int idx = selected[0];
+        double sr = paDevices_[idx].defaultSampleRate;
+        int reqCh = std::min(paDevices_[idx].maxInputChannels, kMaxChannels);
+        if (reqCh < 1) reqCh = 1;
+        auto src = std::make_unique<MiniAudioSource>(sr, reqCh, paDevices_[idx].index);
+        if (src->open()) {
+            audioSource_ = std::move(src);
+            settings_.sampleRate = audioSource_->sampleRate();
+            settings_.isIQ = false;
+            settings_.numChannels = audioSource_->channels();
+        } else {
+            std::fprintf(stderr, "Failed to open primary device %s\n",
+                         paDevices_[idx].name.c_str());
+            return;
+        }
+    }
+
+    // Remaining selected devices become extra sources, each with its own analyzer.
+    int totalCh = settings_.numChannels;
+    for (size_t s = 1; s < selected.size() && totalCh < kMaxChannels; ++s) {
+        int idx = selected[s];
+        double sr = paDevices_[idx].defaultSampleRate;
+        int reqCh = std::min(paDevices_[idx].maxInputChannels, kMaxChannels - totalCh);
+        if (reqCh < 1) reqCh = 1;
+        auto src = std::make_unique<MiniAudioSource>(sr, reqCh, paDevices_[idx].index);
+        if (src->open()) {
+            auto ed = std::make_unique<ExtraDevice>();
+            ed->source = std::move(src);
+            // Configure analyzer with same FFT settings but this device's params.
+            AnalyzerSettings es = settings_;
+            es.sampleRate = ed->source->sampleRate();
+            es.numChannels = ed->source->channels();
+            es.isIQ = false;
+            ed->analyzer.configure(es);
+            totalCh += ed->source->channels();
+            extraDevices_.push_back(std::move(ed));
+        } else {
+            std::fprintf(stderr, "Failed to open extra device %s\n",
+                         paDevices_[idx].name.c_str());
+        }
+    }
+}
+
+int Application::totalNumSpectra() const {
+    int n = analyzer_.numSpectra();
+    for (auto& ed : extraDevices_)
+        n += ed->analyzer.numSpectra();
+    return n;
+}
+
+const std::vector<float>& Application::getSpectrum(int globalCh) const {
+    int n = analyzer_.numSpectra();
+    if (globalCh < n)
+        return analyzer_.channelSpectrum(globalCh);
+    globalCh -= n;
+    for (auto& ed : extraDevices_) {
+        int en = ed->analyzer.numSpectra();
+        if (globalCh < en)
+            return ed->analyzer.channelSpectrum(globalCh);
+        globalCh -= en;
+    }
+    return analyzer_.channelSpectrum(0); // fallback
+}
+
+const std::vector<std::complex<float>>& Application::getComplex(int globalCh) const {
+    int n = analyzer_.numSpectra();
+    if (globalCh < n)
+        return analyzer_.channelComplex(globalCh);
+    globalCh -= n;
+    for (auto& ed : extraDevices_) {
+        int en = ed->analyzer.numSpectra();
+        if (globalCh < en)
+            return ed->analyzer.channelComplex(globalCh);
+        globalCh -= en;
+    }
+    return analyzer_.channelComplex(0); // fallback
+}
+
+const char* Application::getDeviceName(int globalCh) const {
+    // Primary device channels.
+    int n = analyzer_.numSpectra();
+    if (globalCh < n) {
+        if (paDeviceIdx_ >= 0 && paDeviceIdx_ < static_cast<int>(paDevices_.size()))
+            return paDevices_[paDeviceIdx_].name.c_str();
+        // In multi-device mode the primary is the first selected device.
+        for (int i = 0; i < static_cast<int>(paDevices_.size()); ++i)
+            if (paDeviceSelected_[i]) return paDevices_[i].name.c_str();
+        return "Audio Device";
+    }
+    globalCh -= n;
+    // Walk extra devices to find which one owns this channel.
+    int devSel = 0;
+    for (int i = 0; i < static_cast<int>(paDevices_.size()) && i < kMaxChannels; ++i) {
+        if (!paDeviceSelected_[i]) continue;
+        ++devSel;
+        if (devSel <= 1) continue; // skip primary (already handled above)
+        int edIdx = devSel - 2;
+        if (edIdx < static_cast<int>(extraDevices_.size())) {
+            int en = extraDevices_[edIdx]->analyzer.numSpectra();
+            if (globalCh < en)
+                return paDevices_[i].name.c_str();
+            globalCh -= en;
+        }
+    }
+    return "Audio Device";
+}
+
 void Application::openFile(const std::string& path, InputFormat format, double sampleRate) {
     if (audioSource_) audioSource_->close();
+    extraDevices_.clear();
 
     bool isIQ = (format != InputFormat::WAV);
     auto src = std::make_unique<FileSource>(path, format, sampleRate, fileLoop_);
@@ -1494,6 +1678,15 @@ void Application::updateAnalyzerSettings() {
     settings_.window  = static_cast<WindowType>(windowIdx_);
     analyzer_.configure(settings_);
 
+    // Keep extra device analyzers in sync with FFT/overlap/window settings.
+    for (auto& ed : extraDevices_) {
+        AnalyzerSettings es = settings_;
+        es.sampleRate = ed->source->sampleRate();
+        es.numChannels = ed->source->channels();
+        es.isIQ = false;
+        ed->analyzer.configure(es);
+    }
+
     bool sizeChanged = settings_.fftSize     != oldFFTSize ||
                        settings_.isIQ        != oldIQ      ||
                        settings_.numChannels != oldNCh;
@@ -1505,6 +1698,13 @@ void Application::updateAnalyzerSettings() {
             int channels = audioSource_->channels();
             std::vector<float> drain(4096 * channels);
             while (audioSource_->read(drain.data(), 4096) > 0) {}
+        }
+        for (auto& ed : extraDevices_) {
+            if (ed->source && ed->source->isRealTime()) {
+                int ch = ed->source->channels();
+                std::vector<float> drain(4096 * ch);
+                while (ed->source->read(drain.data(), 4096) > 0) {}
+            }
         }
 
         // Invalidate cursor bin indices — they refer to the old FFT size.
@@ -1522,7 +1722,7 @@ void Application::updateAnalyzerSettings() {
 // ── Math channels ────────────────────────────────────────────────────────────
 
 void Application::computeMathChannels() {
-    int nPhys = analyzer_.numSpectra();
+    int nPhys = totalNumSpectra();
     int specSz = analyzer_.spectrumSize();
     mathSpectra_.resize(mathChannels_.size());
 
@@ -1538,10 +1738,10 @@ void Application::computeMathChannels() {
 
         int sx = std::clamp(mc.sourceX, 0, nPhys - 1);
         int sy = std::clamp(mc.sourceY, 0, nPhys - 1);
-        const auto& xDB = analyzer_.channelSpectrum(sx);
-        const auto& yDB = analyzer_.channelSpectrum(sy);
-        const auto& xC  = analyzer_.channelComplex(sx);
-        const auto& yC  = analyzer_.channelComplex(sy);
+        const auto& xDB = getSpectrum(sx);
+        const auto& yDB = getSpectrum(sy);
+        const auto& xC  = getComplex(sx);
+        const auto& yC  = getComplex(sy);
 
         for (int i = 0; i < specSz; ++i) {
             float val = -200.0f;
@@ -1616,7 +1816,7 @@ void Application::computeMathChannels() {
 }
 
 void Application::renderMathPanel() {
-    int nPhys = analyzer_.numSpectra();
+    int nPhys = totalNumSpectra();
 
     // Build source channel name list.
     static const char* chNames[] = {
@@ -1698,7 +1898,8 @@ void Application::loadConfig() {
     colorMapIdx_  = std::clamp(colorMapIdx_, 0, static_cast<int>(ColorMapType::Count) - 1);
     spectrumFrac_ = std::clamp(spectrumFrac_, 0.1f, 0.9f);
 
-    // Find device by saved name.
+    // Restore device selection.
+    multiDeviceMode_ = config_.getBool("multi_device", false);
     std::string devName = config_.getString("device_name", "");
     if (!devName.empty()) {
         for (int i = 0; i < static_cast<int>(paDevices_.size()); ++i) {
@@ -1706,6 +1907,22 @@ void Application::loadConfig() {
                 paDeviceIdx_ = i;
                 break;
             }
+        }
+    }
+    // Restore multi-device selections from comma-separated device names.
+    std::memset(paDeviceSelected_, 0, sizeof(paDeviceSelected_));
+    std::string multiNames = config_.getString("multi_device_names", "");
+    if (!multiNames.empty()) {
+        size_t pos = 0;
+        while (pos < multiNames.size()) {
+            size_t comma = multiNames.find(',', pos);
+            if (comma == std::string::npos) comma = multiNames.size();
+            std::string name = multiNames.substr(pos, comma - pos);
+            for (int i = 0; i < std::min(static_cast<int>(paDevices_.size()), kMaxChannels); ++i) {
+                if (paDevices_[i].name == name)
+                    paDeviceSelected_[i] = true;
+            }
+            pos = comma + 1;
         }
     }
 
@@ -1738,6 +1955,17 @@ void Application::saveConfig() const {
 
     if (paDeviceIdx_ >= 0 && paDeviceIdx_ < static_cast<int>(paDevices_.size()))
         cfg.setString("device_name", paDevices_[paDeviceIdx_].name);
+
+    cfg.setBool("multi_device", multiDeviceMode_);
+    // Save multi-device selections as comma-separated names.
+    std::string multiNames;
+    for (int i = 0; i < std::min(static_cast<int>(paDevices_.size()), kMaxChannels); ++i) {
+        if (paDeviceSelected_[i]) {
+            if (!multiNames.empty()) multiNames += ',';
+            multiNames += paDevices_[i].name;
+        }
+    }
+    cfg.setString("multi_device_names", multiNames);
 
     cfg.save();
 }

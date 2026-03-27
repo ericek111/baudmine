@@ -87,6 +87,7 @@ private:
     void handleSpectrumInput(float posX, float posY, float sizeX, float sizeY);
 
     void openPortAudio();
+    void openMultiDevice();
     void openFile(const std::string& path, InputFormat format, double sampleRate);
     void updateAnalyzerSettings();
     void computeMathChannels();
@@ -103,6 +104,21 @@ private:
     // Audio
     std::unique_ptr<AudioSource> audioSource_;
     std::vector<float>           audioBuf_;     // temp read buffer
+
+    // Extra devices (multi-device mode): each gets its own source + analyzer.
+    struct ExtraDevice {
+        std::unique_ptr<AudioSource> source;
+        SpectrumAnalyzer             analyzer;
+        std::vector<float>           audioBuf;
+    };
+    std::vector<std::unique_ptr<ExtraDevice>> extraDevices_;
+
+    // Helpers to present a unified channel view across all analyzers.
+    int totalNumSpectra() const;
+    const std::vector<float>& getSpectrum(int globalCh) const;
+    const std::vector<std::complex<float>>& getComplex(int globalCh) const;
+    // Returns the device name that owns a given global channel index.
+    const char* getDeviceName(int globalCh) const;
 
     // DSP
     SpectrumAnalyzer analyzer_;
@@ -155,6 +171,8 @@ private:
     // Device selection
     std::vector<MiniAudioSource::DeviceInfo> paDevices_;
     int paDeviceIdx_ = 0;
+    bool paDeviceSelected_[kMaxChannels] = {};  // multi-device checkboxes
+    bool multiDeviceMode_ = false;              // true = use multiple devices as channels
 
     // Channel colors (up to kMaxChannels).  Defaults: L=purple, R=green.
     ImVec4 channelColors_[kMaxChannels] = {
