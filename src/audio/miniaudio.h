@@ -41907,7 +41907,11 @@ static void ma_audio_worklet_processor_created__webaudio(EMSCRIPTEN_WEBAUDIO_T a
             var audioContext = emscriptenGetAudioObject($1);
 
             var reqCh = $2;
-            navigator.mediaDevices.getUserMedia({audio:{channelCount:{ideal:reqCh}}, video:false})
+            var audioConstraints = {channelCount:{ideal:reqCh}};
+            if (window.baudmine_selectedDeviceId) {
+                audioConstraints.deviceId = {exact: window.baudmine_selectedDeviceId};
+            }
+            navigator.mediaDevices.getUserMedia({audio:audioConstraints, video:false})
                 .then(function(stream) {
                     audioContext.streamNode = audioContext.createMediaStreamSource(stream);
                     audioContext.streamNode.connect(audioWorklet);
@@ -42210,7 +42214,11 @@ static ma_result ma_device_init__webaudio(ma_device* pDevice, const ma_device_co
 
             /* Now we need to connect our node to the graph. */
             if (deviceType == window.miniaudio.device_type.capture || deviceType == window.miniaudio.device_type.duplex) {
-                navigator.mediaDevices.getUserMedia({audio:{channelCount:{ideal:channels}}, video:false})
+                var audioConstraints = {channelCount:{ideal:channels}};
+                if (window.baudmine_selectedDeviceId) {
+                    audioConstraints.deviceId = {exact: window.baudmine_selectedDeviceId};
+                }
+                navigator.mediaDevices.getUserMedia({audio:audioConstraints, video:false})
                     .then(function(stream) {
                         device.streamNode = device.webaudio.createMediaStreamSource(stream);
                         device.streamNode.connect(device.scriptNode);

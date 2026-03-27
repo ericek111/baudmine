@@ -4,6 +4,59 @@
 #include <cstdio>
 #include <cstring>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+
+// Enumerate audio input devices via the Web MediaDevices API.
+// Stores results in a JS-side array; returns the number of devices found.
+EM_ASYNC_JS(int, baudmine_js_enumerate_devices, (), {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+        return 0;
+    }
+    // Request mic permission first so labels are populated.
+    try {
+        var stream = await navigator.mediaDevices.getUserMedia({audio: true});
+        stream.getTracks().forEach(function(t) { t.stop(); });
+    } catch (e) {
+        console.warn("baudmine: mic permission denied, device labels may be empty");
+    }
+    try {
+        var devices = await navigator.mediaDevices.enumerateDevices();
+        window.baudmine_audioInputs = [];
+        for (var i = 0; i < devices.length; ++i) {
+            if (devices[i].kind === "audioinput") {
+                window.baudmine_audioInputs.push({
+                    deviceId: devices[i].deviceId,
+                    label: devices[i].label || ("Microphone " + (window.baudmine_audioInputs.length + 1))
+                });
+            }
+        }
+        return window.baudmine_audioInputs.length;
+    } catch (e) {
+        console.error("baudmine: enumerateDevices failed:", e);
+        return 0;
+    }
+});
+
+// Get the label of the device at the given index.
+EM_JS(void, baudmine_js_get_device_name, (int index, char* buf, int bufSize), {
+    var inputs = window.baudmine_audioInputs || [];
+    var name = (index >= 0 && index < inputs.length) ? inputs[index].label : "";
+    stringToUTF8(name, buf, bufSize);
+});
+
+// Set the device ID that the next getUserMedia call should use.
+EM_JS(void, baudmine_js_set_selected_device, (int index), {
+    var inputs = window.baudmine_audioInputs || [];
+    if (index >= 0 && index < inputs.length) {
+        window.baudmine_selectedDeviceId = inputs[index].deviceId;
+    } else {
+        window.baudmine_selectedDeviceId = null;
+    }
+});
+
+#endif // __EMSCRIPTEN__
+
 namespace baudmine {
 
 // ── Shared context (lazy-initialized) ────────────────────────────────────────
@@ -25,6 +78,21 @@ static ma_context* sharedContext() {
 
 std::vector<MiniAudioSource::DeviceInfo> MiniAudioSource::listInputDevices() {
     std::vector<DeviceInfo> result;
+
+#ifdef __EMSCRIPTEN__
+    // Use the Web MediaDevices API to enumerate microphones.
+    int count = baudmine_js_enumerate_devices();
+    for (int i = 0; i < count; ++i) {
+        char nameBuf[256] = {};
+        baudmine_js_get_device_name(i, nameBuf, sizeof(nameBuf));
+        result.push_back({
+            i,
+            nameBuf,
+            2,       // Web Audio typically provides stereo
+            48000.0  // Web Audio default sample rate
+        });
+    }
+#else
     ma_context* ctx = sharedContext();
     if (!ctx) return result;
 
@@ -65,6 +133,8 @@ std::vector<MiniAudioSource::DeviceInfo> MiniAudioSource::listInputDevices() {
             defaultSR
         });
     }
+#endif
+
     return result;
 }
 
@@ -106,6 +176,10 @@ bool MiniAudioSource::open() {
     ma_device_id* pDeviceID = nullptr;
     ma_device_id  deviceID{};
 
+#ifdef __EMSCRIPTEN__
+    // Tell the JS layer which microphone to use in the next getUserMedia call.
+    baudmine_js_set_selected_device(deviceIndex_);
+#else
     if (deviceIndex_ >= 0) {
         ma_device_info* captureDevices;
         ma_uint32 captureCount;
@@ -117,6 +191,7 @@ bool MiniAudioSource::open() {
             }
         }
     }
+#endif
 
     ma_device_config config = ma_device_config_init(ma_device_type_capture);
     config.capture.pDeviceID = pDeviceID;
