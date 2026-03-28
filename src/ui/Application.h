@@ -66,6 +66,7 @@ private:
     float     lastDpr_       = 0.0f;
     void      applyUIScale(float scale);
     void      requestUIScale(float scale);
+    float     systemDpiScale() const;
     void      syncCanvasSize();
 
     // UI visibility

@@ -8,6 +8,11 @@
 
 namespace baudmine {
 
+namespace {
+constexpr float kLinearEpsilon = kLinearEpsilon;  // threshold for log10 of linear power
+constexpr float kLogGuard      = 1e-30f;  // guard against log10(0) in compressed scale
+} // namespace
+
 AudioEngine::AudioEngine() = default;
 
 // ── Device enumeration ───────────────────────────────────────────────────────
@@ -271,7 +276,7 @@ void AudioEngine::computeMathChannels() {
         out.resize(specSz);
 
         if (!mc.enabled) {
-            std::fill(out.begin(), out.end(), -200.0f);
+            std::fill(out.begin(), out.end(), kNoSignalDB);
             continue;
         }
 
@@ -283,7 +288,7 @@ void AudioEngine::computeMathChannels() {
         const auto& yC  = getComplex(sy);
 
         for (int i = 0; i < specSz; ++i) {
-            float val = -200.0f;
+            float val = kNoSignalDB;
             switch (mc.op) {
                 case MathOp::Negate:   val = -xDB[i]; break;
                 case MathOp::Absolute: val = std::abs(xDB[i]); break;
@@ -292,21 +297,21 @@ void AudioEngine::computeMathChannels() {
                 case MathOp::Sqrt:     val = 0.5f * xDB[i]; break;
                 case MathOp::Log: {
                     float lin = std::pow(10.0f, xDB[i] / 10.0f);
-                    val = 10.0f * std::log10(lin + 1e-30f);
+                    val = 10.0f * std::log10(lin + kLogGuard);
                     break;
                 }
                 case MathOp::Add: {
                     float lx = std::pow(10.0f, xDB[i] / 10.0f);
                     float ly = std::pow(10.0f, yDB[i] / 10.0f);
                     float s = lx + ly;
-                    val = (s > 1e-20f) ? 10.0f * std::log10(s) : -200.0f;
+                    val = (s > kLinearEpsilon) ? 10.0f * std::log10(s) : kNoSignalDB;
                     break;
                 }
                 case MathOp::Subtract: {
                     float lx = std::pow(10.0f, xDB[i] / 10.0f);
                     float ly = std::pow(10.0f, yDB[i] / 10.0f);
                     float d = std::abs(lx - ly);
-                    val = (d > 1e-20f) ? 10.0f * std::log10(d) : -200.0f;
+                    val = (d > kLinearEpsilon) ? 10.0f * std::log10(d) : kNoSignalDB;
                     break;
                 }
                 case MathOp::Multiply:
@@ -317,7 +322,7 @@ void AudioEngine::computeMathChannels() {
                         i < static_cast<int>(yC.size())) {
                         auto cross = xC[i] * std::conj(yC[i]);
                         val = std::atan2(cross.imag(), cross.real())
-                              * (180.0f / 3.14159265f);
+                              * (180.0f / kPi);
                     }
                     break;
                 }
@@ -326,7 +331,7 @@ void AudioEngine::computeMathChannels() {
                         i < static_cast<int>(yC.size())) {
                         auto cross = xC[i] * std::conj(yC[i]);
                         float mag2 = std::norm(cross);
-                        val = (mag2 > 1e-20f) ? 10.0f * std::log10(mag2) : -200.0f;
+                        val = (mag2 > kLinearEpsilon) ? 10.0f * std::log10(mag2) : kNoSignalDB;
                     }
                     break;
                 }

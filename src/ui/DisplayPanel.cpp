@@ -8,11 +8,36 @@
 
 namespace baudmine {
 
-bool DisplayPanel::splitReleased() {
-    bool v = splitWasReleased_;
-    splitWasReleased_ = false;
-    return v;
+namespace {
+
+// Zoom the view range centered on a screen-fraction cursor position.
+void zoomView(float& viewLo, float& viewHi, float cursorScreenFrac, float wheelDir) {
+    float viewFrac = viewLo + cursorScreenFrac * (viewHi - viewLo);
+    float factor = (wheelDir > 0) ? kZoomFactor : 1.0f / kZoomFactor;
+    float newSpan = std::clamp((viewHi - viewLo) * factor, 0.001f, 1.0f);
+
+    float newLo = viewFrac - cursorScreenFrac * newSpan;
+    float newHi = newLo + newSpan;
+
+    if (newLo < 0.0f) { newHi -= newLo; newLo = 0.0f; }
+    if (newHi > 1.0f) { newLo -= (newHi - 1.0f); newHi = 1.0f; }
+    viewLo = std::clamp(newLo, 0.0f, 1.0f);
+    viewHi = std::clamp(newHi, 0.0f, 1.0f);
 }
+
+// Pan the view range by a screen-pixel delta.
+void panView(float& viewLo, float& viewHi, float dxPixels, float panelWidth) {
+    float panFrac = -dxPixels / panelWidth * (viewHi - viewLo);
+    float span = viewHi - viewLo;
+    float newLo = viewLo + panFrac;
+    float newHi = viewHi + panFrac;
+    if (newLo < 0.0f) { newLo = 0.0f; newHi = span; }
+    if (newHi > 1.0f) { newHi = 1.0f; newLo = 1.0f - span; }
+    viewLo = newLo;
+    viewHi = newHi;
+}
+
+} // anonymous namespace
 
 void DisplayPanel::renderSpectrum(AudioEngine& audio, UIState& ui,
                                    SpectrumDisplay& specDisplay, Cursors& cursors,
@@ -117,7 +142,7 @@ void DisplayPanel::renderWaterfall(AudioEngine& audio, UIState& ui,
                              {pos.x + availW, yStart + spanH},
                              {ui.viewLo, v1}, {ui.viewHi, v0});
             } else {
-                constexpr float kMinBinFrac = 0.001f;
+                constexpr float kMinBinFrac = kMinLogBinFrac;
                 float logMin2 = std::log10(kMinBinFrac);
                 float logMax2 = 0.0f;
                 int numStrips = std::min(512, static_cast<int>(availW));
@@ -154,12 +179,12 @@ void DisplayPanel::renderWaterfall(AudioEngine& audio, UIState& ui,
 
         // ── Frequency axis labels ──
         ImU32 textCol = IM_COL32(180, 180, 200, 200);
-        double freqFullMin = settings.isIQ ? -settings.sampleRate / 2.0 : 0.0;
-        double freqFullMax = settings.isIQ ?  settings.sampleRate / 2.0 : settings.sampleRate / 2.0;
+        double freqFullMin = freqMin(settings.sampleRate, settings.isIQ);
+        double freqFullMax = freqMax(settings.sampleRate, settings.isIQ);
 
         auto viewFracToFreq = [&](float vf) -> double {
             if (logMode) {
-                constexpr float kMinBinFrac = 0.001f;
+                constexpr float kMinBinFrac = kMinLogBinFrac;
                 float logMin2 = std::log10(kMinBinFrac);
                 float logMax2 = 0.0f;
                 float binFrac = std::pow(10.0f, logMin2 + vf * (logMax2 - logMin2));
@@ -206,8 +231,8 @@ void DisplayPanel::renderWaterfall(AudioEngine& audio, UIState& ui,
                                                      settings.isIQ, ui.freqScale,
                                                      ui.viewLo, ui.viewHi);
             int bins = audio.spectrumSize();
-            double fMin = settings.isIQ ? -settings.sampleRate / 2.0 : 0.0;
-            double fMax = settings.isIQ ?  settings.sampleRate / 2.0 : settings.sampleRate / 2.0;
+            double fMin = freqMin(settings.sampleRate, settings.isIQ);
+            double fMax = freqMax(settings.sampleRate, settings.isIQ);
             int bin = static_cast<int>((freq - fMin) / (fMax - fMin) * (bins - 1));
             bin = std::clamp(bin, 0, bins - 1);
 
@@ -225,35 +250,11 @@ void DisplayPanel::renderWaterfall(AudioEngine& audio, UIState& ui,
         }
 
         if (inWaterfall) {
-            if (io.MouseWheel != 0) {
-                float cursorFrac = (mx - pos.x) / availW;
-                float viewFrac = ui.viewLo + cursorFrac * (ui.viewHi - ui.viewLo);
+            if (io.MouseWheel != 0)
+                zoomView(ui.viewLo, ui.viewHi, (mx - pos.x) / availW, io.MouseWheel);
 
-                float zoomFactor = (io.MouseWheel > 0) ? 0.85f : 1.0f / 0.85f;
-                float newSpan = (ui.viewHi - ui.viewLo) * zoomFactor;
-                newSpan = std::clamp(newSpan, 0.001f, 1.0f);
-
-                float newLo = viewFrac - cursorFrac * newSpan;
-                float newHi = newLo + newSpan;
-
-                if (newLo < 0.0f) { newHi -= newLo; newLo = 0.0f; }
-                if (newHi > 1.0f) { newLo -= (newHi - 1.0f); newHi = 1.0f; }
-                // Safe to cast away const on ui here — caller passes mutable UIState
-                ui.viewLo = std::clamp(newLo, 0.0f, 1.0f);
-                ui.viewHi = std::clamp(newHi, 0.0f, 1.0f);
-            }
-
-            if (ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 1.0f)) {
-                float dx = io.MouseDelta.x;
-                float panFrac = -dx / availW * (ui.viewHi - ui.viewLo);
-                float newLo = ui.viewLo + panFrac;
-                float newHi = ui.viewHi + panFrac;
-                float span = ui.viewHi - ui.viewLo;
-                if (newLo < 0.0f) { newLo = 0.0f; newHi = span; }
-                if (newHi > 1.0f) { newHi = 1.0f; newLo = 1.0f - span; }
-                ui.viewLo = newLo;
-                ui.viewHi = newHi;
-            }
+            if (ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 1.0f))
+                panView(ui.viewLo, ui.viewHi, io.MouseDelta.x, availW);
 
             if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Middle)) {
                 ui.viewLo = 0.0f;
@@ -293,8 +294,8 @@ void DisplayPanel::renderHoverOverlay(const AudioEngine& audio, const UIState& u
     // Hover info (right side)
     {
         int bins = audio.spectrumSize();
-        double fMin = settings.isIQ ? -settings.sampleRate / 2.0 : 0.0;
-        double fMax = settings.isIQ ?  settings.sampleRate / 2.0 : settings.sampleRate / 2.0;
+        double fMin = freqMin(settings.sampleRate, settings.isIQ);
+        double fMax = freqMax(settings.sampleRate, settings.isIQ);
         double binCenterFreq = fMin + (static_cast<double>(cursors.hover.bin) + 0.5)
                                / bins * (fMax - fMin);
 
@@ -336,9 +337,9 @@ void DisplayPanel::handleSpectrumInput(AudioEngine& audio, UIState& ui,
         float dB = specDisplay.screenYToDB(my, posY, sizeY, ui.minDB, ui.maxDB);
 
         int bins = audio.spectrumSize();
-        double freqMin = settings.isIQ ? -settings.sampleRate / 2.0 : 0.0;
-        double freqMax = settings.isIQ ?  settings.sampleRate / 2.0 : settings.sampleRate / 2.0;
-        int bin = static_cast<int>((freq - freqMin) / (freqMax - freqMin) * (bins - 1));
+        double fMin = freqMin(settings.sampleRate, settings.isIQ);
+        double fMax = freqMax(settings.sampleRate, settings.isIQ);
+        int bin = static_cast<int>((freq - fMin) / (fMax - fMin) * (bins - 1));
         bin = std::clamp(bin, 0, bins - 1);
 
         int curCh = std::clamp(ui.waterfallChannel, 0, audio.totalNumSpectra() - 1);
@@ -371,33 +372,11 @@ void DisplayPanel::handleSpectrumInput(AudioEngine& audio, UIState& ui,
                 }
             }
             else if (io.MouseWheel != 0) {
-                float cursorFrac = (mx - posX) / sizeX;
-                float viewFrac = ui.viewLo + cursorFrac * (ui.viewHi - ui.viewLo);
-
-                float zoomFactor = (io.MouseWheel > 0) ? 0.85f : 1.0f / 0.85f;
-                float newSpan = (ui.viewHi - ui.viewLo) * zoomFactor;
-                newSpan = std::clamp(newSpan, 0.001f, 1.0f);
-
-                float newLo = viewFrac - cursorFrac * newSpan;
-                float newHi = newLo + newSpan;
-
-                if (newLo < 0.0f) { newHi -= newLo; newLo = 0.0f; }
-                if (newHi > 1.0f) { newLo -= (newHi - 1.0f); newHi = 1.0f; }
-                ui.viewLo = std::clamp(newLo, 0.0f, 1.0f);
-                ui.viewHi = std::clamp(newHi, 0.0f, 1.0f);
+                zoomView(ui.viewLo, ui.viewHi, (mx - posX) / sizeX, io.MouseWheel);
             }
 
-            if (ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 1.0f)) {
-                float dx = io.MouseDelta.x;
-                float panFrac = -dx / sizeX * (ui.viewHi - ui.viewLo);
-                float newLo = ui.viewLo + panFrac;
-                float newHi = ui.viewHi + panFrac;
-                float span = ui.viewHi - ui.viewLo;
-                if (newLo < 0.0f) { newLo = 0.0f; newHi = span; }
-                if (newHi > 1.0f) { newHi = 1.0f; newLo = 1.0f - span; }
-                ui.viewLo = newLo;
-                ui.viewHi = newHi;
-            }
+            if (ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 1.0f))
+                panView(ui.viewLo, ui.viewHi, io.MouseDelta.x, sizeX);
 
             if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Middle)) {
                 ui.viewLo = 0.0f;
@@ -427,6 +406,7 @@ void DisplayPanel::handleTouch(const SDL_Event& event, UIState& ui, SDL_Window* 
         if (nf >= 2) {
             SDL_Finger* f0 = SDL_GetTouchFinger(tid, 0);
             SDL_Finger* f1 = SDL_GetTouchFinger(tid, 1);
+            if (!f0 || !f1) return;
             float x0 = f0->x * w, x1 = f1->x * w;
             float dx = x1 - x0, dy = (f1->y - f0->y) * h;
             touch_.startDist = std::sqrt(dx * dx + dy * dy);
@@ -446,6 +426,7 @@ void DisplayPanel::handleTouch(const SDL_Event& event, UIState& ui, SDL_Window* 
         if (nf >= 2) {
             SDL_Finger* f0 = SDL_GetTouchFinger(tid, 0);
             SDL_Finger* f1 = SDL_GetTouchFinger(tid, 1);
+            if (!f0 || !f1) return;
             float x0 = f0->x * w, x1 = f1->x * w;
             float dx = x1 - x0, dy = (f1->y - f0->y) * h;
             float dist = std::sqrt(dx * dx + dy * dy);

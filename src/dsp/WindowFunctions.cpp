@@ -4,8 +4,6 @@
 
 namespace baudmine {
 
-static constexpr double kPi = 3.14159265358979323846;
-
 void WindowFunctions::generate(WindowType type, int size, std::vector<float>& out,
                                float kaiserBeta) {
     out.resize(size);

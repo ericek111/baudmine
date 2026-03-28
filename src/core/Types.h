@@ -16,6 +16,15 @@ constexpr int kMinFFTSize = 256;
 constexpr int kMaxFFTSize = 65536;
 constexpr int kDefaultFFTSize = 4096;
 constexpr int kWaterfallHistory = 2048;
+constexpr int kDefaultWindowWidth  = 1400;
+constexpr int kDefaultWindowHeight = 900;
+
+// ── Shared display constants ────────────────────────────────────────────────
+
+constexpr float kNoSignalDB   = -200.0f;  // sentinel for "no signal" in dB
+constexpr float kZoomFactor   = 0.85f;    // scroll-wheel zoom step
+constexpr float kMinLogBinFrac = 0.001f;  // minimum bin fraction for log scale
+constexpr double kPi          = 3.14159265358979323846;
 
 // ── Enumerations ─────────────────────────────────────────────────────────────
 
@@ -85,6 +94,16 @@ inline const char* inputFormatName(InputFormat f) {
         case InputFormat::PortAudio: return "PortAudio";
         default:                     return "Unknown";
     }
+}
+
+// ── Frequency range helpers ──────────────────────────────────────────────────
+
+inline double freqMin(double sampleRate, bool isIQ) {
+    return isIQ ? -sampleRate / 2.0 : 0.0;
+}
+
+inline double freqMax(double sampleRate, bool isIQ) {
+    return sampleRate / 2.0;
 }
 
 // ── Formatting helpers ───────────────────────────────────────────────────────

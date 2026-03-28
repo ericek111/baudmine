@@ -16,15 +16,14 @@ class WaterfallDisplay;
 
 class ControlPanel {
 public:
-    // Render the sidebar.  Returns true if config should be saved.
     void render(AudioEngine& audio, UIState& ui,
                 SpectrumDisplay& specDisplay, Cursors& cursors,
                 Measurements& measurements, ColorMap& colorMap,
                 WaterfallDisplay& waterfall);
 
-    // Action flags — checked and cleared by Application after render().
-    bool needsSave()           { bool v = needsSave_; needsSave_ = false; return v; }
-    bool needsAnalyzerUpdate() { bool v = needsUpdate_; needsUpdate_ = false; return v; }
+    // Consume action flags set during render(). Returns true once, then resets.
+    bool consumeSaveRequest()   { bool v = needsSave_; needsSave_ = false; return v; }
+    bool consumeUpdateRequest() { bool v = needsUpdate_; needsUpdate_ = false; return v; }
 
     // FFT / analysis controls
     static constexpr int kFFTSizes[] = {256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536};

@@ -128,7 +128,7 @@ void ControlPanel::render(AudioEngine& audio, UIState& ui,
             ImGui::SameLine();
             if (ImGui::Button(isLog ? "Logarithmic" : "Linear", {ImGui::GetContentRegionAvail().x, 0})) {
                 if (canLog) {
-                    constexpr float kMinBF = 0.001f;
+                    constexpr float kMinBF = kMinLogBinFrac;
                     float logMin = std::log10(kMinBF);
                     auto screenToBin = [&](float sf) -> float {
                         if (isLog) return std::pow(10.0f, logMin + sf * (0.0f - logMin));

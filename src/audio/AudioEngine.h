@@ -50,7 +50,6 @@ public:
     // ── Math channels ──
     std::vector<MathChannel>&       mathChannels()       { return mathChannels_; }
     const std::vector<MathChannel>& mathChannels() const { return mathChannels_; }
-    std::vector<std::vector<float>>&       mathSpectra()       { return mathSpectra_; }
     const std::vector<std::vector<float>>& mathSpectra() const { return mathSpectra_; }
     void computeMathChannels();
 

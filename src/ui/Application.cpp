@@ -104,6 +104,17 @@ void Application::requestUIScale(float scale) {
     pendingScale_ = scale;
 }
 
+float Application::systemDpiScale() const {
+#ifdef __EMSCRIPTEN__
+    return js_devicePixelRatio();
+#else
+    float ddpi = 0;
+    if (SDL_GetDisplayDPI(0, &ddpi, nullptr, nullptr) == 0 && ddpi > 0)
+        return ddpi / 96.0f;
+    return 1.0f;
+#endif
+}
+
 // ── Lifecycle ───────────────────────────────────────────────────────────────
 
 Application::~Application() {
@@ -147,7 +158,7 @@ bool Application::init(int argc, char** argv) {
 
     window_ = SDL_CreateWindow("Baudmine Spectrum Analyzer",
                                SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                               1400, 900,
+                               kDefaultWindowWidth, kDefaultWindowHeight,
                                SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE |
                                SDL_WINDOW_ALLOW_HIGHDPI);
     if (!window_) {
@@ -186,14 +197,9 @@ bool Application::init(int argc, char** argv) {
 
     // DPI-aware UI scaling
     {
-        float dpiScale = 1.0f;
+        float dpiScale = systemDpiScale();
 #ifdef __EMSCRIPTEN__
-        dpiScale = js_devicePixelRatio();
         lastDpr_ = dpiScale;
-#else
-        float ddpi = 0;
-        if (SDL_GetDisplayDPI(0, &ddpi, nullptr, nullptr) == 0 && ddpi > 0)
-            dpiScale = ddpi / 96.0f;
 #endif
         applyUIScale((uiScale_ > 0.0f) ? uiScale_ : dpiScale);
     }
@@ -472,15 +478,7 @@ void Application::render() {
                 int curPct = static_cast<int>(appliedScale_ * 100.0f + 0.5f);
                 if (ImGui::MenuItem("Auto", nullptr, uiScale_ == 0.0f)) {
                     uiScale_ = 0.0f;
-                    float dpiScale = 1.0f;
-#ifdef __EMSCRIPTEN__
-                    dpiScale = js_devicePixelRatio();
-#else
-                    float ddpi = 0;
-                    if (SDL_GetDisplayDPI(0, &ddpi, nullptr, nullptr) == 0 && ddpi > 0)
-                        dpiScale = ddpi / 96.0f;
-#endif
-                    requestUIScale(dpiScale);
+                    requestUIScale(systemDpiScale());
                     saveConfig();
                 }
                 for (int s : kScales) {
@@ -542,9 +540,9 @@ void Application::render() {
                              measurements_, colorMap_, waterfall_);
         ImGui::EndChild();
 
-        if (controlPanel_.needsAnalyzerUpdate())
+        if (controlPanel_.consumeUpdateRequest())
             updateAnalyzerSettings();
-        if (controlPanel_.needsSave())
+        if (controlPanel_.consumeSaveRequest())
             saveConfig();
 
         ImGui::SameLine();

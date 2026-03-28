@@ -42,9 +42,6 @@ public:
     float spectrumFrac  = 0.35f;
     bool  draggingSplit  = false;
 
-    // Returns true if split was just released (caller should save config).
-    bool splitReleased();
-
 private:
     void handleSpectrumInput(AudioEngine& audio, UIState& ui,
                              SpectrumDisplay& specDisplay, Cursors& cursors,
@@ -59,8 +56,6 @@ private:
         float lastCenterX = 0.0f;
         float lastDist = 0.0f;
     } touch_;
-
-    bool splitWasReleased_ = false;
 
     // Scratch buffers
     std::vector<std::vector<float>>   wfSpectraScratch_;
