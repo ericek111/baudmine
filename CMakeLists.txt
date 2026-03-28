@@ -53,6 +53,8 @@ set(SOURCES
     src/ui/SpectrumDisplay.cpp
     src/ui/Cursors.cpp
     src/ui/Measurements.cpp
+    src/ui/ControlPanel.cpp
+    src/ui/DisplayPanel.cpp
     src/ui/Application.cpp
 )
 
