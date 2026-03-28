@@ -157,4 +157,53 @@ struct Color3 {
     uint8_t r, g, b;
 };
 
+// ── Channel math operations ──────────────────────────────────────────────────
+
+enum class MathOp {
+    // Unary (on channel X)
+    Negate,       // -x  (negate dB)
+    Absolute,     // |x| (absolute value of dB)
+    Square,       // x^2 in linear  → 2*x_dB
+    Cube,         // x^3 in linear  → 3*x_dB
+    Sqrt,         // sqrt in linear → 0.5*x_dB
+    Log,          // 10*log10(10^(x_dB/10) + 1)  — compressed scale
+    // Binary (on channels X and Y)
+    Add,          // linear(x) + linear(y)  → dB
+    Subtract,     // |linear(x) - linear(y)| → dB
+    Multiply,     // x_dB + y_dB  (multiply in linear = add in dB)
+    Phase,        // angle(X_cplx * conj(Y_cplx)) in degrees
+    CrossCorr,    // |X_cplx * conj(Y_cplx)| → dB
+    Count
+};
+
+inline bool mathOpIsBinary(MathOp op) {
+    return op >= MathOp::Add;
+}
+
+inline const char* mathOpName(MathOp op) {
+    switch (op) {
+        case MathOp::Negate:    return "-x";
+        case MathOp::Absolute:  return "|x|";
+        case MathOp::Square:    return "x^2";
+        case MathOp::Cube:      return "x^3";
+        case MathOp::Sqrt:      return "sqrt(x)";
+        case MathOp::Log:       return "log(x)";
+        case MathOp::Add:       return "x + y";
+        case MathOp::Subtract:  return "x - y";
+        case MathOp::Multiply:  return "x * y";
+        case MathOp::Phase:     return "phase(x,y)";
+        case MathOp::CrossCorr: return "xcorr(x,y)";
+        default:                return "?";
+    }
+}
+
+struct MathChannel {
+    MathOp op        = MathOp::Subtract;
+    int    sourceX   = 0;
+    int    sourceY   = 1;
+    float  color[4]  = {1.0f, 1.0f, 1.0f, 1.0f};
+    bool   enabled   = true;
+    bool   waterfall = false;
+};
+
 } // namespace baudmine

@@ -1,5 +1,4 @@
 #include "ui/Application.h"
-#include "audio/FileSource.h"
 
 #include <imgui.h>
 #include <imgui_impl_sdl2.h>
@@ -55,12 +54,9 @@ void Application::syncCanvasSize() {
     int curW, curH;
     emscripten_get_canvas_element_size("#canvas", &curW, &curH);
     if (curW != targetW || curH != targetH) {
-        // Set backing store + viewport to physical pixels.
-        // CSS display size is handled by the stylesheet (100vw × 100vh).
         emscripten_set_canvas_element_size("#canvas", targetW, targetH);
         glViewport(0, 0, targetW, targetH);
     }
-    // Re-apply UI scale if devicePixelRatio changed (orientation, zoom, etc.)
     if (std::abs(dpr - lastDpr_) > 0.01f) {
         lastDpr_ = dpr;
         float scale = (uiScale_ > 0.0f) ? uiScale_ : dpr;
@@ -74,7 +70,6 @@ void Application::applyUIScale(float scale) {
     if (std::abs(scale - appliedScale_) < 0.01f) return;
     appliedScale_ = scale;
 
-    // Snapshot the 1x base style once.
     static ImGuiStyle baseStyle = [] {
         ImGuiStyle s;
         ImGui::StyleColorsDark(&s);
@@ -84,7 +79,6 @@ void Application::applyUIScale(float scale) {
         return s;
     }();
 
-    // Determine framebuffer scale (e.g. 2x–3x on HiDPI phones).
     float fbScale = 1.0f;
     int winW, winH, drawW, drawH;
     SDL_GetWindowSize(window_, &winW, &winH);
@@ -94,19 +88,14 @@ void Application::applyUIScale(float scale) {
     logicalScale_ = scale / fbScale;
 
     ImGuiIO& io = ImGui::GetIO();
-
-    // Rasterize the font at full physical resolution so the atlas has
-    // crisp glyphs, then tell ImGui to scale them back to logical size.
-    // Without this the 13px atlas gets bilinear-stretched to 13*dpr px.
     io.Fonts->Clear();
     ImFontConfig fc;
-    fc.SizePixels = std::max(8.0f, 13.0f * scale);   // physical pixels
+    fc.SizePixels = std::max(8.0f, 13.0f * scale);
     io.Fonts->AddFontDefault(&fc);
     io.Fonts->Build();
     ImGui_ImplOpenGL3_DestroyFontsTexture();
-    io.FontGlobalScale = 1.0f / fbScale;              // display at logical size
+    io.FontGlobalScale = 1.0f / fbScale;
 
-    // Restore base style, then scale from 1x.
     ImGui::GetStyle() = baseStyle;
     ImGui::GetStyle().ScaleAllSizes(logicalScale_);
 }
@@ -120,7 +109,7 @@ Application::~Application() {
 }
 
 bool Application::init(int argc, char** argv) {
-    // Parse command line: baudmine [file] [--format fmt] [--rate sr]
+    // Parse command line
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--format" && i + 1 < argc) {
@@ -132,7 +121,7 @@ bool Application::init(int argc, char** argv) {
         } else if (arg == "--rate" && i + 1 < argc) {
             fileSampleRate_ = std::stof(argv[++i]);
         } else if (arg == "--iq") {
-            settings_.isIQ = true;
+            audio_.settings().isIQ = true;
         } else if (arg[0] != '-') {
             filePath_ = arg;
         }
@@ -165,15 +154,12 @@ bool Application::init(int argc, char** argv) {
     }
 
 #ifdef __EMSCRIPTEN__
-    // SDL_CreateWindow sets inline width/height on the canvas element,
-    // overriding the stylesheet's 100vw/100vh.  Clear them so CSS stays
-    // in control of display size while we manage the backing store.
     js_clearCanvasInlineSize();
 #endif
 
     glContext_ = SDL_GL_CreateContext(window_);
     SDL_GL_MakeCurrent(window_, glContext_);
-    SDL_GL_SetSwapInterval(1); // vsync
+    SDL_GL_SetSwapInterval(1);
 
     // ImGui init
     IMGUI_CHECKVERSION();
@@ -195,9 +181,9 @@ bool Application::init(int argc, char** argv) {
 #endif
 
     // Enumerate audio devices
-    paDevices_ = MiniAudioSource::listInputDevices();
+    audio_.enumerateDevices();
 
-    // Load saved config (overwrites defaults for FFT size, overlap, window, etc.)
+    // Load saved config
     loadConfig();
 
     // Sync canvas to physical pixels before first frame (WASM)
@@ -219,24 +205,25 @@ bool Application::init(int argc, char** argv) {
     }
 
     // Apply loaded settings
-    settings_.fftSize    = kFFTSizes[fftSizeIdx_];
-    settings_.overlap    = overlapPct_ / 100.0f;
-    settings_.window     = static_cast<WindowType>(windowIdx_);
-    settings_.sampleRate = fileSampleRate_;
-    settings_.isIQ       = false;
+    auto& settings = audio_.settings();
+    settings.fftSize    = kFFTSizes[fftSizeIdx_];
+    settings.overlap    = overlapPct_ / 100.0f;
+    settings.window     = static_cast<WindowType>(windowIdx_);
+    settings.sampleRate = fileSampleRate_;
+    settings.isIQ       = false;
 
     // Open source
     if (!filePath_.empty()) {
         InputFormat fmt;
         switch (fileFormatIdx_) {
-            case 0: fmt = InputFormat::Float32IQ; settings_.isIQ = true; break;
-            case 1: fmt = InputFormat::Int16IQ;   settings_.isIQ = true; break;
-            case 2: fmt = InputFormat::Uint8IQ;   settings_.isIQ = true; break;
+            case 0: fmt = InputFormat::Float32IQ; settings.isIQ = true; break;
+            case 1: fmt = InputFormat::Int16IQ;   settings.isIQ = true; break;
+            case 2: fmt = InputFormat::Uint8IQ;   settings.isIQ = true; break;
             default: fmt = InputFormat::WAV;      break;
         }
         openFile(filePath_, fmt, fileSampleRate_);
     } else {
-        openPortAudio();
+        openDevice();
     }
 
     updateAnalyzerSettings();
@@ -248,11 +235,12 @@ bool Application::init(int argc, char** argv) {
 void Application::mainLoopStep() {
     syncCanvasSize();
 
-    // Apply deferred UI scale (must happen outside the ImGui frame).
     if (pendingScale_ > 0.0f) {
         applyUIScale(pendingScale_);
         pendingScale_ = 0.0f;
     }
+
+    const auto& settings = audio_.settings();
 
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
@@ -268,10 +256,10 @@ void Application::mainLoopStep() {
             if (key == SDLK_SPACE)  paused_ = !paused_;
             if (key == SDLK_p) {
                 int pkCh = std::clamp(waterfallChannel_, 0,
-                                      totalNumSpectra() - 1);
-                cursors_.snapToPeak(getSpectrum(pkCh),
-                                    settings_.sampleRate, settings_.isIQ,
-                                    settings_.fftSize);
+                                      audio_.totalNumSpectra() - 1);
+                cursors_.snapToPeak(audio_.getSpectrum(pkCh),
+                                    settings.sampleRate, settings.isIQ,
+                                    settings.fftSize);
             }
         }
     }
@@ -299,10 +287,7 @@ void Application::run() {
 }
 
 void Application::shutdown() {
-    if (audioSource_) {
-        audioSource_->close();
-        audioSource_.reset();
-    }
+    audio_.closeAll();
 
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL2_Shutdown();
@@ -320,95 +305,54 @@ void Application::shutdown() {
 }
 
 void Application::processAudio() {
-    if (!audioSource_) return;
+    if (!audio_.hasSource()) return;
 
-    int channels = audioSource_->channels();
-    // Read in hop-sized chunks, process up to a limited number of spectra per
-    // frame to avoid freezing the UI when a large backlog has accumulated.
-    size_t hopFrames = static_cast<size_t>(
-        settings_.fftSize * (1.0f - settings_.overlap));
-    if (hopFrames < 1) hopFrames = 1;
-    size_t framesToRead = hopFrames;
-    audioBuf_.resize(framesToRead * channels);
+    const auto& settings = audio_.settings();
+    int spectraThisFrame = audio_.processAudio();
 
-    constexpr int kMaxSpectraPerFrame = 8;
-    int spectraThisFrame = 0;
-
-    // Process primary source.
-    while (spectraThisFrame < kMaxSpectraPerFrame) {
-        size_t framesRead = audioSource_->read(audioBuf_.data(), framesToRead);
-        if (framesRead == 0) break;
-
-        analyzer_.pushSamples(audioBuf_.data(), framesRead);
-
-        if (analyzer_.hasNewSpectrum()) {
-            ++spectraThisFrame;
-        }
-    }
-
-    // Process extra devices independently (each at its own pace).
-    for (auto& ed : extraDevices_) {
-        int edCh = ed->source->channels();
-        const auto& edSettings = ed->analyzer.settings();
-        size_t edHop = static_cast<size_t>(edSettings.fftSize * (1.0f - edSettings.overlap));
-        if (edHop < 1) edHop = 1;
-        ed->audioBuf.resize(edHop * edCh);
-
-        int edSpectra = 0;
-        while (edSpectra < kMaxSpectraPerFrame) {
-            size_t framesRead = ed->source->read(ed->audioBuf.data(), edHop);
-            if (framesRead == 0) break;
-            ed->analyzer.pushSamples(ed->audioBuf.data(), framesRead);
-            if (ed->analyzer.hasNewSpectrum())
-                ++edSpectra;
-        }
-    }
-
-    // Update waterfall / cursors / math using unified channel view.
-    // Only advance when the primary analyzer produced a spectrum (controls scroll rate).
     if (spectraThisFrame > 0) {
-        computeMathChannels();
+        audio_.computeMathChannels();
 
-        int nSpec = totalNumSpectra();
+        int nSpec = audio_.totalNumSpectra();
+        const auto& mathChannels = audio_.mathChannels();
+        const auto& mathSpectra  = audio_.mathSpectra();
+
         if (waterfallMultiCh_ && nSpec > 1) {
             wfSpectraScratch_.clear();
             wfChInfoScratch_.clear();
 
             for (int ch = 0; ch < nSpec; ++ch) {
                 const auto& c = channelColors_[ch % kMaxChannels];
-                wfSpectraScratch_.push_back(getSpectrum(ch));
+                wfSpectraScratch_.push_back(audio_.getSpectrum(ch));
                 wfChInfoScratch_.push_back({c.x, c.y, c.z,
                                     channelEnabled_[ch % kMaxChannels]});
             }
-            for (size_t mi = 0; mi < mathChannels_.size(); ++mi) {
-                if (mathChannels_[mi].enabled && mathChannels_[mi].waterfall &&
-                    mi < mathSpectra_.size()) {
-                    const auto& c = mathChannels_[mi].color;
-                    wfSpectraScratch_.push_back(mathSpectra_[mi]);
-                    wfChInfoScratch_.push_back({c.x, c.y, c.z, true});
+            for (size_t mi = 0; mi < mathChannels.size(); ++mi) {
+                if (mathChannels[mi].enabled && mathChannels[mi].waterfall &&
+                    mi < mathSpectra.size()) {
+                    const auto& c = mathChannels[mi].color;
+                    wfSpectraScratch_.push_back(mathSpectra[mi]);
+                    wfChInfoScratch_.push_back({c[0], c[1], c[2], true});
                 }
             }
             waterfall_.pushLineMulti(wfSpectraScratch_, wfChInfoScratch_, minDB_, maxDB_);
         } else {
             int wfCh = std::clamp(waterfallChannel_, 0, nSpec - 1);
-            waterfall_.pushLine(getSpectrum(wfCh), minDB_, maxDB_);
+            waterfall_.pushLine(audio_.getSpectrum(wfCh), minDB_, maxDB_);
         }
         int curCh = std::clamp(waterfallChannel_, 0, nSpec - 1);
-        cursors_.update(getSpectrum(curCh),
-                       settings_.sampleRate, settings_.isIQ, settings_.fftSize);
-        measurements_.update(getSpectrum(curCh),
-                             settings_.sampleRate, settings_.isIQ, settings_.fftSize);
+        cursors_.update(audio_.getSpectrum(curCh),
+                       settings.sampleRate, settings.isIQ, settings.fftSize);
+        measurements_.update(audio_.getSpectrum(curCh),
+                             settings.sampleRate, settings.isIQ, settings.fftSize);
     }
 
-    if (audioSource_->isEOF() && !audioSource_->isRealTime()) {
+    if (audio_.source()->isEOF() && !audio_.source()->isRealTime()) {
         paused_ = true;
     }
 }
 
 void Application::render() {
-    // Skip rendering entirely when the window is minimized — the drawable
-    // size is 0, which would create zero-sized GL textures and divide-by-zero
-    // in layout calculations.
     if (SDL_GetWindowFlags(window_) & SDL_WINDOW_MINIMIZED) {
         SDL_Delay(16);
         return;
@@ -419,6 +363,8 @@ void Application::render() {
     ImGui::NewFrame();
 
     hoverPanel_ = HoverPanel::None;
+
+    const auto& settings = audio_.settings();
 
     // Full-screen layout
     ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -432,7 +378,6 @@ void Application::render() {
 
     // Menu bar
     if (ImGui::BeginMenuBar()) {
-        // Sidebar toggle (leftmost)
         if (ImGui::Button(showSidebar_ ? "  <<  " : "  >>  ")) {
             showSidebar_ = !showSidebar_;
             saveConfig();
@@ -474,26 +419,29 @@ void Application::render() {
             ImGui::Separator();
 
             // ── Audio device ──
-            if (!paDevices_.empty()) {
-                if (ImGui::Checkbox("Multi-Device", &multiDeviceMode_)) {
-                    // Switching modes: clear multi-select, re-open
-                    std::memset(paDeviceSelected_, 0, sizeof(paDeviceSelected_));
-                    if (!multiDeviceMode_) {
-                        openPortAudio();
+            const auto& devices = audio_.devices();
+            if (!devices.empty()) {
+                bool multiMode = audio_.multiDeviceMode();
+                if (ImGui::Checkbox("Multi-Device", &multiMode)) {
+                    audio_.setMultiDeviceMode(multiMode);
+                    audio_.clearDeviceSelections();
+                    if (!multiMode) {
+                        openDevice();
                         updateAnalyzerSettings();
                         saveConfig();
                     }
                 }
 
-                if (multiDeviceMode_) {
-                    // Multi-device: checkboxes, each selected device = one channel.
+                if (audio_.multiDeviceMode()) {
                     ImGui::Text("Select devices (each = 1 channel):");
-                    int maxDevs = std::min(static_cast<int>(paDevices_.size()), kMaxChannels);
+                    int maxDevs = std::min(static_cast<int>(devices.size()), kMaxChannels);
                     bool changed = false;
                     for (int i = 0; i < maxDevs; ++i) {
+                        bool sel = audio_.deviceSelected(i);
                         if (ImGui::Checkbox(
-                                (paDevices_[i].name + "##mdev" + std::to_string(i)).c_str(),
-                                &paDeviceSelected_[i])) {
+                                (devices[i].name + "##mdev" + std::to_string(i)).c_str(),
+                                &sel)) {
+                            audio_.setDeviceSelected(i, sel);
                             changed = true;
                         }
                     }
@@ -503,24 +451,25 @@ void Application::render() {
                         saveConfig();
                     }
                 } else {
-                    // Single-device mode: combo selector.
                     ImGui::Text("Audio Device");
                     std::vector<const char*> devNames;
-                    for (auto& d : paDevices_) devNames.push_back(d.name.c_str());
+                    for (auto& d : devices) devNames.push_back(d.name.c_str());
+                    int devIdx = audio_.deviceIdx();
                     ImGui::SetNextItemWidth(250);
-                    if (ImGui::Combo("##device", &paDeviceIdx_, devNames.data(),
+                    if (ImGui::Combo("##device", &devIdx, devNames.data(),
                                      static_cast<int>(devNames.size()))) {
-                        openPortAudio();
+                        audio_.setDeviceIdx(devIdx);
+                        openDevice();
                         updateAnalyzerSettings();
                         saveConfig();
                     }
                 }
             }
             if (ImGui::MenuItem("Open Audio Device")) {
-                if (multiDeviceMode_)
+                if (audio_.multiDeviceMode())
                     openMultiDevice();
                 else
-                    openPortAudio();
+                    openDevice();
                 updateAnalyzerSettings();
             }
 
@@ -594,8 +543,8 @@ void Application::render() {
             float barW = ImGui::GetWindowWidth();
             char statusBuf[128];
             std::snprintf(statusBuf, sizeof(statusBuf), "%.0f Hz | %d pt | %.1f Hz/bin | %.0f FPS",
-                          settings_.sampleRate, settings_.fftSize,
-                          settings_.sampleRate / settings_.fftSize,
+                          settings.sampleRate, settings.fftSize,
+                          settings.sampleRate / settings.fftSize,
                           ImGui::GetIO().Framerate);
             ImVec2 textSz = ImGui::CalcTextSize(statusBuf);
             ImGui::SameLine(barW - textSz.x - 16);
@@ -611,7 +560,6 @@ void Application::render() {
     float controlW = showSidebar_ ? 270.0f * logicalScale_ : 0.0f;
     float contentW = totalW - (showSidebar_ ? controlW + 8 : 0);
 
-    // Control panel (sidebar)
     if (showSidebar_) {
         ImGui::BeginChild("Controls", {controlW, contentH}, true);
         renderControlPanel();
@@ -637,7 +585,6 @@ void Application::render() {
 
         if (active) {
             float dy = ImGui::GetIO().MouseDelta.y;
-            // Dragging down = more waterfall = less spectrum
             spectrumFrac_ -= dy / contentH;
             spectrumFrac_ = std::clamp(spectrumFrac_, 0.1f, 0.9f);
             draggingSplit_ = true;
@@ -646,7 +593,6 @@ void Application::render() {
             saveConfig();
         }
 
-        // Draw splitter line
         ImU32 splCol = (hovered || active)
             ? IM_COL32(100, 150, 255, 220)
             : IM_COL32(80, 80, 100, 150);
@@ -660,14 +606,12 @@ void Application::render() {
         if (cursors_.hover.active && specSizeX_ > 0 && wfSizeX_ > 0) {
             ImDrawList* dlp = ImGui::GetWindowDrawList();
             float hx = specDisplay_.freqToScreenX(cursors_.hover.freq,
-                           specPosX_, specSizeX_, settings_.sampleRate,
-                           settings_.isIQ, freqScale_, viewLo_, viewHi_);
+                           specPosX_, specSizeX_, settings.sampleRate,
+                           settings.isIQ, freqScale_, viewLo_, viewHi_);
             ImU32 hoverCol = IM_COL32(200, 200, 200, 80);
 
-            // Line in spectrum area only
             dlp->AddLine({hx, specPosY_}, {hx, specPosY_ + specSizeY_}, hoverCol, 1.0f);
 
-            // Frequency label at top of waterfall
             char freqLabel[48];
             fmtFreq(freqLabel, sizeof(freqLabel), cursors_.hover.freq);
 
@@ -680,10 +624,9 @@ void Application::render() {
 
             // ── Hover info (right side of spectrum/waterfall) ──
             {
-                // Use bin center for frequency
-                int bins = analyzer_.spectrumSize();
-                double fMin = settings_.isIQ ? -settings_.sampleRate / 2.0 : 0.0;
-                double fMax = settings_.isIQ ?  settings_.sampleRate / 2.0 : settings_.sampleRate / 2.0;
+                int bins = audio_.spectrumSize();
+                double fMin = settings.isIQ ? -settings.sampleRate / 2.0 : 0.0;
+                double fMax = settings.isIQ ?  settings.sampleRate / 2.0 : settings.sampleRate / 2.0;
                 double binCenterFreq = fMin + (static_cast<double>(cursors_.hover.bin) + 0.5)
                                        / bins * (fMax - fMin);
 
@@ -696,7 +639,6 @@ void Application::render() {
                     fmtFreq(hoverBuf, sizeof(hoverBuf), binCenterFreq);
                 }
 
-                // Right-align the text
                 ImU32 hoverTextCol = IM_COL32(100, 230, 130, 240);
                 float rightEdge = specPosX_ + specSizeX_ - 8;
                 float hy2 = specPosY_ + 4;
@@ -710,14 +652,12 @@ void Application::render() {
     ImGui::End();
 
 #ifndef IMGUI_DISABLE_DEBUG_TOOLS
-    // ImGui debug windows
     if (showDemoWindow_)    ImGui::ShowDemoWindow(&showDemoWindow_);
     if (showMetricsWindow_) ImGui::ShowMetricsWindow(&showMetricsWindow_);
     if (showDebugLog_)      ImGui::ShowDebugLogWindow(&showDebugLog_);
     if (showStackTool_)     ImGui::ShowIDStackToolWindow(&showStackTool_);
 #endif
 
-    // Render
     ImGui::Render();
     int displayW, displayH;
     SDL_GL_GetDrawableSize(window_, &displayW, &displayH);
@@ -729,21 +669,22 @@ void Application::render() {
 }
 
 void Application::renderControlPanel() {
+    const auto& settings = audio_.settings();
+
     // ── Playback ──
     float btnW = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 2) / 3.0f;
     if (ImGui::Button(paused_ ? "Resume" : "Pause", {btnW, 0}))
         paused_ = !paused_;
     ImGui::SameLine();
     if (ImGui::Button("Clear", {btnW, 0})) {
-        analyzer_.clearHistory();
-        for (auto& ed : extraDevices_) ed->analyzer.clearHistory();
+        audio_.clearHistory();
     }
     ImGui::SameLine();
     if (ImGui::Button("Peak", {btnW, 0})) {
-        int pkCh = std::clamp(waterfallChannel_, 0, totalNumSpectra() - 1);
-        cursors_.snapToPeak(getSpectrum(pkCh),
-                            settings_.sampleRate, settings_.isIQ,
-                            settings_.fftSize);
+        int pkCh = std::clamp(waterfallChannel_, 0, audio_.totalNumSpectra() - 1);
+        cursors_.snapToPeak(audio_.getSpectrum(pkCh),
+                            settings.sampleRate, settings.isIQ,
+                            settings.fftSize);
     }
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Snap cursor A to peak");
 
@@ -755,7 +696,7 @@ void Application::renderControlPanel() {
         float availSpace = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x);
         ImGui::SetNextItemWidth(availSpace * 0.35f);
         if (ImGui::Combo("##fftsize", &fftSizeIdx_, sizeNames, kNumFFTSizes)) {
-            settings_.fftSize = kFFTSizes[fftSizeIdx_];
+            audio_.settings().fftSize = kFFTSizes[fftSizeIdx_];
             updateAnalyzerSettings();
             saveConfig();
         }
@@ -767,23 +708,23 @@ void Application::renderControlPanel() {
         ImGui::SetNextItemWidth(availSpace * 0.65f);
         if (ImGui::Combo("##window", &windowIdx_, winNames,
                          static_cast<int>(WindowType::Count))) {
-            settings_.window = static_cast<WindowType>(windowIdx_);
+            audio_.settings().window = static_cast<WindowType>(windowIdx_);
             updateAnalyzerSettings();
             saveConfig();
         }
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Window Function");
 
-        if (settings_.window == WindowType::Kaiser) {
+        if (settings.window == WindowType::Kaiser) {
             ImGui::SetNextItemWidth(-1);
-            if (ImGui::SliderFloat("##kaiser", &settings_.kaiserBeta, 0.0f, 20.0f, "Kaiser: %.1f"))
+            if (ImGui::SliderFloat("##kaiser", &audio_.settings().kaiserBeta, 0.0f, 20.0f, "Kaiser: %.1f"))
                 updateAnalyzerSettings();
         }
 
         // Overlap
         {
-            int hopSamples = static_cast<int>(settings_.fftSize * (1.0f - settings_.overlap));
+            int hopSamples = static_cast<int>(settings.fftSize * (1.0f - settings.overlap));
             if (hopSamples < 1) hopSamples = 1;
-            int overlapSamples = settings_.fftSize - hopSamples;
+            int overlapSamples = settings.fftSize - hopSamples;
 
             ImGui::SetNextItemWidth(-1);
             float sliderVal = 1.0f - std::pow(1.0f - overlapPct_ / 99.0f, 0.25f);
@@ -791,7 +732,7 @@ void Application::renderControlPanel() {
                 float inv = 1.0f - sliderVal;
                 float inv2 = inv * inv;
                 overlapPct_ = 99.0f * (1.0f - inv2 * inv2);
-                settings_.overlap = overlapPct_ / 100.0f;
+                audio_.settings().overlap = overlapPct_ / 100.0f;
                 updateAnalyzerSettings();
                 saveConfig();
             }
@@ -833,7 +774,7 @@ void Application::renderControlPanel() {
 
         {
             bool isLog = (freqScale_ == FreqScale::Logarithmic);
-            bool canLog = !settings_.isIQ;
+            bool canLog = !settings.isIQ;
             ImGui::AlignTextToFramePadding();
             ImGui::Text("Freq. scale:");
             ImGui::SameLine();
@@ -889,16 +830,14 @@ void Application::renderControlPanel() {
             }
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Reset to 2x zoom");
         }
-
     }
 
     // ── Channels ──
     ImGui::Spacing();
     {
-        int nCh = totalNumSpectra();
+        int nCh = audio_.totalNumSpectra();
         bool isMulti = waterfallMultiCh_ && nCh > 1;
 
-        // Header with inline Single/Multi toggle
         float widgetW = (nCh > 1) ? ImGui::CalcTextSize(" Multi ").x + ImGui::GetStyle().FramePadding.x * 2 : 0.0f;
         float gap = ImGui::GetStyle().ItemSpacing.x * 0.25f;
         ImVec2 hdrMin = ImGui::GetCursorScreenPos();
@@ -921,7 +860,6 @@ void Application::renderControlPanel() {
 
         if (headerOpen) {
             if (isMulti) {
-                // Multi-channel: per-channel colors and enable
                 static const char* defaultNames[] = {
                     "Left", "Right", "Ch 3", "Ch 4", "Ch 5", "Ch 6", "Ch 7", "Ch 8"
                 };
@@ -932,11 +870,10 @@ void Application::renderControlPanel() {
                     ImGui::ColorEdit3(defaultNames[ch], &channelColors_[ch].x,
                                       ImGuiColorEditFlags_NoInputs);
                     if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("%s", getDeviceName(ch));
+                        ImGui::SetTooltip("%s", audio_.getDeviceName(ch));
                     ImGui::PopID();
                 }
             } else {
-                // Single-channel: color map + channel selector
                 const char* cmNames[] = {"Magma", "Viridis", "Inferno", "Plasma", "Grayscale"};
                 ImGui::SetNextItemWidth(-1);
                 if (ImGui::Combo("##colormap", &colorMapIdx_, cmNames,
@@ -960,12 +897,12 @@ void Application::renderControlPanel() {
     // ── Math ──
     ImGui::Spacing();
     {
-        float btnW = ImGui::GetFrameHeight();
+        float btnW2 = ImGui::GetFrameHeight();
         float gap = ImGui::GetStyle().ItemSpacing.x * 0.25f;
         ImVec2 hdrMin = ImGui::GetCursorScreenPos();
         float winLeft = ImGui::GetWindowPos().x;
         float hdrRight = hdrMin.x + ImGui::GetContentRegionAvail().x;
-        ImGui::PushClipRect({winLeft, hdrMin.y}, {hdrRight - btnW - gap, hdrMin.y + 200}, true);
+        ImGui::PushClipRect({winLeft, hdrMin.y}, {hdrRight - btnW2 - gap, hdrMin.y + 200}, true);
         bool mathOpen = ImGui::CollapsingHeader("##math_hdr",
                                                  ImGuiTreeNodeFlags_DefaultOpen |
                                                  ImGuiTreeNodeFlags_AllowOverlap);
@@ -973,15 +910,15 @@ void Application::renderControlPanel() {
         ImGui::SameLine();
         ImGui::Text("Math");
         ImGui::SameLine();
-        ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - btnW + ImGui::GetStyle().FramePadding.x);
-        if (ImGui::Button("+##addmath", {btnW, 0})) {
-            int nPhys = totalNumSpectra();
+        ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - btnW2 + ImGui::GetStyle().FramePadding.x);
+        if (ImGui::Button("+##addmath", {btnW2, 0})) {
+            int nPhys = audio_.totalNumSpectra();
             MathChannel mc;
             mc.op = MathOp::Subtract;
             mc.sourceX = 0;
             mc.sourceY = std::min(1, nPhys - 1);
-            mc.color = {1.0f, 1.0f, 0.5f, 1.0f};
-            mathChannels_.push_back(mc);
+            mc.color[0] = 1.0f; mc.color[1] = 1.0f; mc.color[2] = 0.5f; mc.color[3] = 1.0f;
+            audio_.mathChannels().push_back(mc);
         }
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Add math channel");
 
@@ -993,12 +930,12 @@ void Application::renderControlPanel() {
     // ── Cursors ──
     ImGui::Spacing();
     {
-        float btnW = ImGui::CalcTextSize("Reset").x + ImGui::GetStyle().FramePadding.x * 2;
+        float btnW2 = ImGui::CalcTextSize("Reset").x + ImGui::GetStyle().FramePadding.x * 2;
         float gap = ImGui::GetStyle().ItemSpacing.x * 0.25f;
         ImVec2 hdrMin = ImGui::GetCursorScreenPos();
         float winLeft = ImGui::GetWindowPos().x;
         float hdrRight = hdrMin.x + ImGui::GetContentRegionAvail().x;
-        ImGui::PushClipRect({winLeft, hdrMin.y}, {hdrRight - btnW - gap, hdrMin.y + 200}, true);
+        ImGui::PushClipRect({winLeft, hdrMin.y}, {hdrRight - btnW2 - gap, hdrMin.y + 200}, true);
         bool cursorsOpen = ImGui::CollapsingHeader("##cursors_hdr",
                                                     ImGuiTreeNodeFlags_DefaultOpen |
                                                     ImGuiTreeNodeFlags_AllowOverlap);
@@ -1006,7 +943,7 @@ void Application::renderControlPanel() {
         ImGui::SameLine();
         ImGui::Text("Cursors");
         ImGui::SameLine();
-        ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - btnW + ImGui::GetStyle().FramePadding.x);
+        ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - btnW2 + ImGui::GetStyle().FramePadding.x);
         if (ImGui::SmallButton("Reset##cursors")) {
             cursors_.cursorA.active = false;
             cursors_.cursorB.active = false;
@@ -1051,14 +988,14 @@ void Application::renderControlPanel() {
 
     // ── Status (bottom) ──
     ImGui::Separator();
-    ImGui::TextDisabled("Mode: %s", settings_.isIQ ? "I/Q"
-                        : (settings_.numChannels > 1 ? "Multi-ch" : "Real"));
-
+    ImGui::TextDisabled("Mode: %s", settings.isIQ ? "I/Q"
+                        : (settings.numChannels > 1 ? "Multi-ch" : "Real"));
 }
 
 void Application::renderSpectrumPanel() {
+    const auto& settings = audio_.settings();
+
     float availW = ImGui::GetContentRegionAvail().x;
-    // Spectrum is at the bottom — use all remaining height after waterfall + splitter.
     float specH = ImGui::GetContentRegionAvail().y;
 
     ImVec2 pos = ImGui::GetCursorScreenPos();
@@ -1067,9 +1004,10 @@ void Application::renderSpectrumPanel() {
     specSizeX_ = availW;
     specSizeY_ = specH;
 
-    // Build per-channel styles and combine physical + math spectra.
-    int nPhys = totalNumSpectra();
-    int nMath = static_cast<int>(mathSpectra_.size());
+    int nPhys = audio_.totalNumSpectra();
+    const auto& mathChannels = audio_.mathChannels();
+    const auto& mathSpectra  = audio_.mathSpectra();
+    int nMath = static_cast<int>(mathSpectra.size());
 
     allSpectraScratch_.clear();
     stylesScratch_.clear();
@@ -1077,7 +1015,7 @@ void Application::renderSpectrumPanel() {
     // Physical channels (skip disabled ones).
     for (int ch = 0; ch < nPhys; ++ch) {
         if (!channelEnabled_[ch % kMaxChannels]) continue;
-        allSpectraScratch_.push_back(getSpectrum(ch));
+        allSpectraScratch_.push_back(audio_.getSpectrum(ch));
         const auto& c = channelColors_[ch % kMaxChannels];
         uint8_t r = static_cast<uint8_t>(c.x * 255);
         uint8_t g = static_cast<uint8_t>(c.y * 255);
@@ -1087,28 +1025,28 @@ void Application::renderSpectrumPanel() {
 
     // Math channels.
     for (int mi = 0; mi < nMath; ++mi) {
-        if (mi < static_cast<int>(mathChannels_.size()) && mathChannels_[mi].enabled) {
-            allSpectraScratch_.push_back(mathSpectra_[mi]);
-            const auto& c = mathChannels_[mi].color;
-            uint8_t r = static_cast<uint8_t>(c.x * 255);
-            uint8_t g = static_cast<uint8_t>(c.y * 255);
-            uint8_t b = static_cast<uint8_t>(c.z * 255);
+        if (mi < static_cast<int>(mathChannels.size()) && mathChannels[mi].enabled) {
+            allSpectraScratch_.push_back(mathSpectra[mi]);
+            const auto& c = mathChannels[mi].color;
+            uint8_t r = static_cast<uint8_t>(c[0] * 255);
+            uint8_t g = static_cast<uint8_t>(c[1] * 255);
+            uint8_t b = static_cast<uint8_t>(c[2] * 255);
             stylesScratch_.push_back({IM_COL32(r, g, b, 220), IM_COL32(r, g, b, 35)});
         }
     }
 
     specDisplay_.updatePeakHold(allSpectraScratch_);
     specDisplay_.draw(allSpectraScratch_, stylesScratch_, minDB_, maxDB_,
-                      settings_.sampleRate, settings_.isIQ, freqScale_,
+                      settings.sampleRate, settings.isIQ, freqScale_,
                       specPosX_, specPosY_, specSizeX_, specSizeY_,
                       viewLo_, viewHi_);
 
     cursors_.draw(specDisplay_, specPosX_, specPosY_, specSizeX_, specSizeY_,
-                  settings_.sampleRate, settings_.isIQ, freqScale_, minDB_, maxDB_,
+                  settings.sampleRate, settings.isIQ, freqScale_, minDB_, maxDB_,
                   viewLo_, viewHi_);
 
     measurements_.draw(specDisplay_, specPosX_, specPosY_, specSizeX_, specSizeY_,
-                       settings_.sampleRate, settings_.isIQ, freqScale_, minDB_, maxDB_,
+                       settings.sampleRate, settings.isIQ, freqScale_, minDB_, maxDB_,
                        viewLo_, viewHi_);
 
     handleSpectrumInput(specPosX_, specPosY_, specSizeX_, specSizeY_);
@@ -1117,16 +1055,15 @@ void Application::renderSpectrumPanel() {
 }
 
 void Application::renderWaterfallPanel() {
+    const auto& settings = audio_.settings();
+
     float availW = ImGui::GetContentRegionAvail().x;
-    // Waterfall is at the top — compute height from the split fraction.
     constexpr float kSplitterH = 6.0f;
     float parentH = ImGui::GetContentRegionAvail().y;
     float availH = (parentH - kSplitterH) * (1.0f - spectrumFrac_);
 
-    // History depth must be >= panel height for 1:1 pixel mapping.
-    // Only recreate when bin count or needed height actually changes.
     int neededH = std::max(1024, static_cast<int>(availH) + 1);
-    int binCount = std::max(1, analyzer_.spectrumSize());
+    int binCount = std::max(1, audio_.spectrumSize());
     if (binCount != waterfall_.width() || waterfall_.height() < neededH) {
         waterfall_.resize(binCount, neededH);
         waterfall_.setColorMap(colorMap_);
@@ -1138,29 +1075,17 @@ void Application::renderWaterfallPanel() {
         auto texID = static_cast<ImTextureID>(waterfall_.textureID());
 
         int h = waterfall_.height();
-        // The newest row was just written at currentRow()+1 (mod h) — but
-        // advanceRow already decremented, so currentRow() IS the newest.
         int screenRows = std::min(static_cast<int>(availH), h);
-
-        // Newest row index in the circular buffer.
         int newestRow = (waterfall_.currentRow() + 1) % h;
 
-        // Render 1:1 (one texture row = one screen pixel), bottom-aligned,
-        // newest line at bottom, scrolling upward.
-        //
-        // We flip the V coordinates (v1 before v0) so that the vertical
-        // direction is reversed: newest at the bottom of the draw region.
         float rowToV = 1.0f / h;
 
-        bool logMode = (freqScale_ == FreqScale::Logarithmic && !settings_.isIQ);
+        bool logMode = (freqScale_ == FreqScale::Logarithmic && !settings.isIQ);
 
-        // drawSpan renders rows [rowStart..rowStart+rowCount) but with
-        // flipped V so oldest is at top and newest at bottom.
         auto drawSpan = [&](int rowStart, int rowCount, float yStart, float spanH) {
             float v0 = rowStart * rowToV;
             float v1 = (rowStart + rowCount) * rowToV;
 
-            // Flip: swap v0 and v1 so texture is vertically inverted
             if (!logMode) {
                 dl->AddImage(texID,
                              {pos.x, yStart},
@@ -1186,36 +1111,27 @@ void Application::renderWaterfallPanel() {
             }
         };
 
-        // From newestRow, walk forward (increasing index mod h) for
-        // screenRows steps to cover newest→oldest.
-        // With V-flip, oldest rows render at the top, newest at the bottom.
         float pxPerRow = availH / static_cast<float>(screenRows);
 
         if (newestRow + screenRows <= h) {
             drawSpan(newestRow, screenRows, pos.y, availH);
         } else {
-            // Wrap-around: two spans.  Because we flip V, the second span
-            // (wrap-around, containing older rows) goes at the TOP.
-            int firstCount = h - newestRow;  // rows newestRow..h-1
-            int secondCount = screenRows - firstCount;  // rows 0..secondCount-1
+            int firstCount = h - newestRow;
+            int secondCount = screenRows - firstCount;
 
-            // Second span (older, wraps to index 0) at top
             float secondH = secondCount * pxPerRow;
             if (secondCount > 0)
                 drawSpan(0, secondCount, pos.y, secondH);
 
-            // First span (newer, includes newestRow) at bottom
             float firstH = availH - secondH;
             drawSpan(newestRow, firstCount, pos.y + secondH, firstH);
         }
 
         // ── Frequency axis labels ──
         ImU32 textCol = IM_COL32(180, 180, 200, 200);
-        double freqFullMin = settings_.isIQ ? -settings_.sampleRate / 2.0 : 0.0;
-        double freqFullMax = settings_.isIQ ?  settings_.sampleRate / 2.0 : settings_.sampleRate / 2.0;
+        double freqFullMin = settings.isIQ ? -settings.sampleRate / 2.0 : 0.0;
+        double freqFullMax = settings.isIQ ?  settings.sampleRate / 2.0 : settings.sampleRate / 2.0;
 
-        // Map a view fraction to frequency.  In log mode, viewLo_/viewHi_
-        // are in screen-fraction space; convert via the log mapping.
         auto viewFracToFreq = [&](float vf) -> double {
             if (logMode) {
                 constexpr float kMinBinFrac = 0.001f;
@@ -1245,12 +1161,11 @@ void Application::renderWaterfallPanel() {
             dl->AddText({x + 2, pos.y + 2}, textCol, label);
         }
 
-        // Store waterfall geometry for cross-panel cursor drawing.
         wfPosX_ = pos.x; wfPosY_ = pos.y; wfSizeX_ = availW; wfSizeY_ = availH;
 
         measurements_.drawWaterfall(specDisplay_, wfPosX_, wfPosY_, wfSizeX_, wfSizeY_,
-                                     settings_.sampleRate, settings_.isIQ, freqScale_,
-                                     viewLo_, viewHi_, screenRows, analyzer_.spectrumSize());
+                                     settings.sampleRate, settings.isIQ, freqScale_,
+                                     viewLo_, viewHi_, screenRows, audio_.spectrumSize());
 
         // ── Mouse interaction: zoom, pan & hover on waterfall ──
         ImGuiIO& io = ImGui::GetIO();
@@ -1259,37 +1174,34 @@ void Application::renderWaterfallPanel() {
         bool inWaterfall = mx >= pos.x && mx <= pos.x + availW &&
                            my >= pos.y && my <= pos.y + availH;
 
-        // Hover cursor from waterfall
         if (inWaterfall) {
             hoverPanel_ = HoverPanel::Waterfall;
             double freq = specDisplay_.screenXToFreq(mx, pos.x, availW,
-                                                      settings_.sampleRate,
-                                                      settings_.isIQ, freqScale_,
+                                                      settings.sampleRate,
+                                                      settings.isIQ, freqScale_,
                                                       viewLo_, viewHi_);
-            int bins = analyzer_.spectrumSize();
-            double fMin = settings_.isIQ ? -settings_.sampleRate / 2.0 : 0.0;
-            double fMax = settings_.isIQ ?  settings_.sampleRate / 2.0 : settings_.sampleRate / 2.0;
+            int bins = audio_.spectrumSize();
+            double fMin = settings.isIQ ? -settings.sampleRate / 2.0 : 0.0;
+            double fMax = settings.isIQ ?  settings.sampleRate / 2.0 : settings.sampleRate / 2.0;
             int bin = static_cast<int>((freq - fMin) / (fMax - fMin) * (bins - 1));
             bin = std::clamp(bin, 0, bins - 1);
 
-            // Time offset: bottom = newest (0s), top = oldest
-            float yFrac = 1.0f - (my - pos.y) / availH;  // 0 at bottom, 1 at top
-            int hopSamples = static_cast<int>(settings_.fftSize * (1.0f - settings_.overlap));
+            float yFrac = 1.0f - (my - pos.y) / availH;
+            int hopSamples = static_cast<int>(settings.fftSize * (1.0f - settings.overlap));
             if (hopSamples < 1) hopSamples = 1;
-            double secondsPerLine = static_cast<double>(hopSamples) / settings_.sampleRate;
+            double secondsPerLine = static_cast<double>(hopSamples) / settings.sampleRate;
             hoverWfTimeOffset_ = static_cast<float>(yFrac * screenRows * secondsPerLine);
 
-            int curCh = std::clamp(waterfallChannel_, 0, totalNumSpectra() - 1);
-            const auto& spec = getSpectrum(curCh);
+            int curCh = std::clamp(waterfallChannel_, 0, audio_.totalNumSpectra() - 1);
+            const auto& spec = audio_.getSpectrum(curCh);
             if (!spec.empty()) {
                 cursors_.hover = {true, freq, spec[bin], bin};
             }
         }
 
         if (inWaterfall) {
-            // Scroll wheel: zoom centered on cursor
             if (io.MouseWheel != 0) {
-                float cursorFrac = (mx - pos.x) / availW;  // 0..1 on screen
+                float cursorFrac = (mx - pos.x) / availW;
                 float viewFrac = viewLo_ + cursorFrac * (viewHi_ - viewLo_);
 
                 float zoomFactor = (io.MouseWheel > 0) ? 0.85f : 1.0f / 0.85f;
@@ -1299,14 +1211,12 @@ void Application::renderWaterfallPanel() {
                 float newLo = viewFrac - cursorFrac * newSpan;
                 float newHi = newLo + newSpan;
 
-                // Clamp to [0, 1]
                 if (newLo < 0.0f) { newHi -= newLo; newLo = 0.0f; }
                 if (newHi > 1.0f) { newLo -= (newHi - 1.0f); newHi = 1.0f; }
                 viewLo_ = std::clamp(newLo, 0.0f, 1.0f);
                 viewHi_ = std::clamp(newHi, 0.0f, 1.0f);
             }
 
-            // Middle-click + drag: pan
             if (ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 1.0f)) {
                 float dx = io.MouseDelta.x;
                 float panFrac = -dx / availW * (viewHi_ - viewLo_);
@@ -1319,7 +1229,6 @@ void Application::renderWaterfallPanel() {
                 viewHi_ = newHi;
             }
 
-            // Double-click: reset zoom
             if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Middle)) {
                 viewLo_ = 0.0f;
                 viewHi_ = 1.0f;
@@ -1337,11 +1246,9 @@ void Application::handleTouchEvent(const SDL_Event& event) {
         touch_.count = std::max(0, touch_.count - 1);
     }
 
-    // Two-finger gesture start: snapshot state
     if (touch_.count == 2 && event.type == SDL_FINGERDOWN) {
         int w, h;
         SDL_GetWindowSize(window_, &w, &h);
-        // Get both finger positions from SDL touch API
         SDL_TouchID tid = event.tfinger.touchId;
         int nf = SDL_GetNumTouchFingers(tid);
         if (nf >= 2) {
@@ -1358,7 +1265,6 @@ void Application::handleTouchEvent(const SDL_Event& event) {
         }
     }
 
-    // Two-finger motion: pinch + pan
     if (touch_.count == 2 && event.type == SDL_FINGERMOTION) {
         int w, h;
         SDL_GetWindowSize(window_, &w, &h);
@@ -1373,18 +1279,15 @@ void Application::handleTouchEvent(const SDL_Event& event) {
             float centerX = (x0 + x1) * 0.5f;
 
             if (touch_.startDist > 1.0f) {
-                // Zoom: scale the span by start/current distance ratio
                 float span0 = touch_.startHi - touch_.startLo;
                 float ratio = touch_.startDist / std::max(dist, 1.0f);
                 float newSpan = std::clamp(span0 * ratio, 0.001f, 1.0f);
 
-                // Anchor zoom at the initial midpoint (in view-fraction space)
                 float panelW = wfSizeX_ > 0 ? wfSizeX_ : static_cast<float>(w);
                 float panelX = wfPosX_;
                 float midFrac = (touch_.startCenterX - panelX) / panelW;
                 float midView = touch_.startLo + midFrac * span0;
 
-                // Pan: shift by finger midpoint movement
                 float panDelta = -(centerX - touch_.startCenterX) / panelW * newSpan;
 
                 float newLo = midView - midFrac * newSpan + panDelta;
@@ -1401,6 +1304,8 @@ void Application::handleTouchEvent(const SDL_Event& event) {
 
 void Application::handleSpectrumInput(float posX, float posY,
                                        float sizeX, float sizeY) {
+    const auto& settings = audio_.settings();
+
     ImGuiIO& io = ImGui::GetIO();
     float mx = io.MousePos.x;
     float my = io.MousePos.y;
@@ -1410,42 +1315,37 @@ void Application::handleSpectrumInput(float posX, float posY,
 
     if (inRegion) {
         hoverPanel_ = HoverPanel::Spectrum;
-        // Update hover cursor
         double freq = specDisplay_.screenXToFreq(mx, posX, sizeX,
-                                                  settings_.sampleRate,
-                                                  settings_.isIQ, freqScale_,
+                                                  settings.sampleRate,
+                                                  settings.isIQ, freqScale_,
                                                   viewLo_, viewHi_);
         float dB = specDisplay_.screenYToDB(my, posY, sizeY, minDB_, maxDB_);
 
-        // Find closest bin
-        int bins = analyzer_.spectrumSize();
-        double freqMin = settings_.isIQ ? -settings_.sampleRate / 2.0 : 0.0;
-        double freqMax = settings_.isIQ ?  settings_.sampleRate / 2.0 : settings_.sampleRate / 2.0;
+        int bins = audio_.spectrumSize();
+        double freqMin = settings.isIQ ? -settings.sampleRate / 2.0 : 0.0;
+        double freqMax = settings.isIQ ?  settings.sampleRate / 2.0 : settings.sampleRate / 2.0;
         int bin = static_cast<int>((freq - freqMin) / (freqMax - freqMin) * (bins - 1));
         bin = std::clamp(bin, 0, bins - 1);
 
-        int curCh = std::clamp(waterfallChannel_, 0, totalNumSpectra() - 1);
-        const auto& spec = getSpectrum(curCh);
+        int curCh = std::clamp(waterfallChannel_, 0, audio_.totalNumSpectra() - 1);
+        const auto& spec = audio_.getSpectrum(curCh);
         if (!spec.empty()) {
             dB = spec[bin];
             cursors_.hover = {true, freq, dB, bin};
         }
 
-        // Left drag: cursor A
         if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
             int cBin = cursors_.snapToPeaks ? cursors_.findLocalPeak(spec, bin, 10) : bin;
-            double cFreq = analyzer_.binToFreq(cBin);
+            double cFreq = audio_.binToFreq(cBin);
             cursors_.setCursorA(cFreq, spec[cBin], cBin);
         }
-        // Right drag: cursor B
         if (ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
             int cBin = cursors_.snapToPeaks ? cursors_.findLocalPeak(spec, bin, 10) : bin;
-            double cFreq = analyzer_.binToFreq(cBin);
+            double cFreq = audio_.binToFreq(cBin);
             cursors_.setCursorB(cFreq, spec[cBin], cBin);
         }
 
         {
-            // Ctrl+Scroll or Shift+Scroll: zoom dB range
             if (io.MouseWheel != 0 && (io.KeyCtrl || io.KeyShift)) {
                 float zoom = io.MouseWheel * 5.0f;
                 minDB_ += zoom;
@@ -1456,7 +1356,6 @@ void Application::handleSpectrumInput(float posX, float posY,
                     maxDB_ = mid + 5.0f;
                 }
             }
-            // Scroll (no modifier): zoom frequency axis centered on cursor
             else if (io.MouseWheel != 0) {
                 float cursorFrac = (mx - posX) / sizeX;
                 float viewFrac = viewLo_ + cursorFrac * (viewHi_ - viewLo_);
@@ -1474,7 +1373,6 @@ void Application::handleSpectrumInput(float posX, float posY,
                 viewHi_ = std::clamp(newHi, 0.0f, 1.0f);
             }
 
-            // Middle-click + drag: pan
             if (ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 1.0f)) {
                 float dx = io.MouseDelta.x;
                 float panFrac = -dx / sizeX * (viewHi_ - viewLo_);
@@ -1487,14 +1385,12 @@ void Application::handleSpectrumInput(float posX, float posY,
                 viewHi_ = newHi;
             }
 
-            // Double middle-click: reset zoom
             if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Middle)) {
                 viewLo_ = 0.0f;
                 viewHi_ = 1.0f;
             }
         }
     } else {
-        // Only clear hover if waterfall didn't already set it this frame
         if (hoverPanel_ != HoverPanel::Waterfall) {
             hoverPanel_ = HoverPanel::None;
             cursors_.hover.active = false;
@@ -1502,339 +1398,74 @@ void Application::handleSpectrumInput(float posX, float posY,
     }
 }
 
-void Application::openPortAudio() {
-    if (audioSource_) audioSource_->close();
-    extraDevices_.clear();
+// ── Source management (delegates to AudioEngine) ─────────────────────────────
 
-    int deviceIdx = -1;
-    double sr = 48000.0;
-    if (paDeviceIdx_ >= 0 && paDeviceIdx_ < static_cast<int>(paDevices_.size())) {
-        deviceIdx = paDevices_[paDeviceIdx_].index;
-        sr = paDevices_[paDeviceIdx_].defaultSampleRate;
-    }
-
-    // Request stereo (or max available) so we can show per-channel spectra.
-    int reqCh = 2;
-    if (paDeviceIdx_ >= 0 && paDeviceIdx_ < static_cast<int>(paDevices_.size()))
-        reqCh = std::min(paDevices_[paDeviceIdx_].maxInputChannels, kMaxChannels);
-    if (reqCh < 1) reqCh = 1;
-    auto src = std::make_unique<MiniAudioSource>(sr, reqCh, deviceIdx);
-    if (src->open()) {
-        audioSource_ = std::move(src);
-        settings_.sampleRate = audioSource_->sampleRate();
-        settings_.isIQ = false;
-        settings_.numChannels = audioSource_->channels();
-    } else {
-        std::fprintf(stderr, "Failed to open audio device\n");
-    }
+void Application::openDevice() {
+    audio_.openDevice(audio_.deviceIdx());
+    fileSampleRate_ = static_cast<float>(audio_.settings().sampleRate);
 }
 
 void Application::openMultiDevice() {
-    if (audioSource_) audioSource_->close();
-    extraDevices_.clear();
-
-    // Collect selected device indices.
-    std::vector<int> selected;
-    int maxDevs = std::min(static_cast<int>(paDevices_.size()), kMaxChannels);
-    for (int i = 0; i < maxDevs; ++i) {
-        if (paDeviceSelected_[i])
-            selected.push_back(i);
-    }
-    if (selected.empty()) return;
-
-    // First selected device becomes the primary source.
-    {
-        int idx = selected[0];
-        double sr = paDevices_[idx].defaultSampleRate;
-        int reqCh = std::min(paDevices_[idx].maxInputChannels, kMaxChannels);
-        if (reqCh < 1) reqCh = 1;
-        auto src = std::make_unique<MiniAudioSource>(sr, reqCh, paDevices_[idx].index);
-        if (src->open()) {
-            audioSource_ = std::move(src);
-            settings_.sampleRate = audioSource_->sampleRate();
-            settings_.isIQ = false;
-            settings_.numChannels = audioSource_->channels();
-        } else {
-            std::fprintf(stderr, "Failed to open primary device %s\n",
-                         paDevices_[idx].name.c_str());
-            return;
-        }
-    }
-
-    // Remaining selected devices become extra sources, each with its own analyzer.
-    int totalCh = settings_.numChannels;
-    for (size_t s = 1; s < selected.size() && totalCh < kMaxChannels; ++s) {
-        int idx = selected[s];
-        double sr = paDevices_[idx].defaultSampleRate;
-        int reqCh = std::min(paDevices_[idx].maxInputChannels, kMaxChannels - totalCh);
-        if (reqCh < 1) reqCh = 1;
-        auto src = std::make_unique<MiniAudioSource>(sr, reqCh, paDevices_[idx].index);
-        if (src->open()) {
-            auto ed = std::make_unique<ExtraDevice>();
-            ed->source = std::move(src);
-            // Configure analyzer with same FFT settings but this device's params.
-            AnalyzerSettings es = settings_;
-            es.sampleRate = ed->source->sampleRate();
-            es.numChannels = ed->source->channels();
-            es.isIQ = false;
-            ed->analyzer.configure(es);
-            totalCh += ed->source->channels();
-            extraDevices_.push_back(std::move(ed));
-        } else {
-            std::fprintf(stderr, "Failed to open extra device %s\n",
-                         paDevices_[idx].name.c_str());
-        }
-    }
-}
-
-int Application::totalNumSpectra() const {
-    int n = analyzer_.numSpectra();
-    for (auto& ed : extraDevices_)
-        n += ed->analyzer.numSpectra();
-    return n;
-}
-
-const std::vector<float>& Application::getSpectrum(int globalCh) const {
-    int n = analyzer_.numSpectra();
-    if (globalCh < n)
-        return analyzer_.channelSpectrum(globalCh);
-    globalCh -= n;
-    for (auto& ed : extraDevices_) {
-        int en = ed->analyzer.numSpectra();
-        if (globalCh < en)
-            return ed->analyzer.channelSpectrum(globalCh);
-        globalCh -= en;
-    }
-    return analyzer_.channelSpectrum(0); // fallback
-}
-
-const std::vector<std::complex<float>>& Application::getComplex(int globalCh) const {
-    int n = analyzer_.numSpectra();
-    if (globalCh < n)
-        return analyzer_.channelComplex(globalCh);
-    globalCh -= n;
-    for (auto& ed : extraDevices_) {
-        int en = ed->analyzer.numSpectra();
-        if (globalCh < en)
-            return ed->analyzer.channelComplex(globalCh);
-        globalCh -= en;
-    }
-    return analyzer_.channelComplex(0); // fallback
-}
-
-const char* Application::getDeviceName(int globalCh) const {
-    // Primary device channels.
-    int n = analyzer_.numSpectra();
-    if (globalCh < n) {
-        if (paDeviceIdx_ >= 0 && paDeviceIdx_ < static_cast<int>(paDevices_.size()))
-            return paDevices_[paDeviceIdx_].name.c_str();
-        // In multi-device mode the primary is the first selected device.
-        for (int i = 0; i < static_cast<int>(paDevices_.size()); ++i)
-            if (paDeviceSelected_[i]) return paDevices_[i].name.c_str();
-        return "Audio Device";
-    }
-    globalCh -= n;
-    // Walk extra devices to find which one owns this channel.
-    int devSel = 0;
-    for (int i = 0; i < static_cast<int>(paDevices_.size()) && i < kMaxChannels; ++i) {
-        if (!paDeviceSelected_[i]) continue;
-        ++devSel;
-        if (devSel <= 1) continue; // skip primary (already handled above)
-        int edIdx = devSel - 2;
-        if (edIdx < static_cast<int>(extraDevices_.size())) {
-            int en = extraDevices_[edIdx]->analyzer.numSpectra();
-            if (globalCh < en)
-                return paDevices_[i].name.c_str();
-            globalCh -= en;
-        }
-    }
-    return "Audio Device";
+    bool selected[kMaxChannels] = {};
+    const auto& devices = audio_.devices();
+    int maxDevs = std::min(static_cast<int>(devices.size()), kMaxChannels);
+    for (int i = 0; i < maxDevs; ++i)
+        selected[i] = audio_.deviceSelected(i);
+    audio_.openMultiDevice(selected, maxDevs);
 }
 
 void Application::openFile(const std::string& path, InputFormat format, double sampleRate) {
-    if (audioSource_) audioSource_->close();
-    extraDevices_.clear();
-
-    bool isIQ = (format != InputFormat::WAV);
-    auto src = std::make_unique<FileSource>(path, format, sampleRate, fileLoop_);
-    if (src->open()) {
-        settings_.sampleRate = src->sampleRate();
-        settings_.isIQ = isIQ;
-        settings_.numChannels = isIQ ? 1 : src->channels();
-        audioSource_ = std::move(src);
-        fileSampleRate_ = static_cast<float>(settings_.sampleRate);
-    } else {
-        std::fprintf(stderr, "Failed to open file: %s\n", path.c_str());
-    }
+    audio_.openFile(path, format, sampleRate, fileLoop_);
+    fileSampleRate_ = static_cast<float>(audio_.settings().sampleRate);
 }
 
 void Application::updateAnalyzerSettings() {
-    int  oldFFTSize = settings_.fftSize;
-    bool oldIQ      = settings_.isIQ;
-    int  oldNCh     = settings_.numChannels;
+    auto& settings = audio_.settings();
+    int  oldFFTSize = settings.fftSize;
+    bool oldIQ      = settings.isIQ;
+    int  oldNCh     = settings.numChannels;
 
-    settings_.fftSize = kFFTSizes[fftSizeIdx_];
-    settings_.overlap = overlapPct_ / 100.0f;
-    settings_.window  = static_cast<WindowType>(windowIdx_);
-    analyzer_.configure(settings_);
+    settings.fftSize = kFFTSizes[fftSizeIdx_];
+    settings.overlap = overlapPct_ / 100.0f;
+    settings.window  = static_cast<WindowType>(windowIdx_);
+    audio_.configure(settings);
 
-    // Keep extra device analyzers in sync with FFT/overlap/window settings.
-    for (auto& ed : extraDevices_) {
-        AnalyzerSettings es = settings_;
-        es.sampleRate = ed->source->sampleRate();
-        es.numChannels = ed->source->channels();
-        es.isIQ = false;
-        ed->analyzer.configure(es);
-    }
-
-    bool sizeChanged = settings_.fftSize     != oldFFTSize ||
-                       settings_.isIQ        != oldIQ      ||
-                       settings_.numChannels != oldNCh;
+    bool sizeChanged = settings.fftSize     != oldFFTSize ||
+                       settings.isIQ        != oldIQ      ||
+                       settings.numChannels != oldNCh;
 
     if (sizeChanged) {
-        // Drain any stale audio data from the ring buffer so a backlog from
-        // the reconfigure doesn't flood the new analyzer.
-        if (audioSource_ && audioSource_->isRealTime()) {
-            int channels = audioSource_->channels();
-            std::vector<float> drain(4096 * channels);
-            while (audioSource_->read(drain.data(), 4096) > 0) {}
-        }
-        for (auto& ed : extraDevices_) {
-            if (ed->source && ed->source->isRealTime()) {
-                int ch = ed->source->channels();
-                std::vector<float> drain(4096 * ch);
-                while (ed->source->read(drain.data(), 4096) > 0) {}
-            }
-        }
+        audio_.drainSources();
 
-        // Invalidate cursor bin indices — they refer to the old FFT size.
         cursors_.cursorA.active = false;
         cursors_.cursorB.active = false;
 
-        // Re-init waterfall texture so the old image from a different FFT
-        // size doesn't persist.
         int reinitH = std::max(1024, waterfall_.height());
-        int binCount2 = std::max(1, analyzer_.spectrumSize());
+        int binCount2 = std::max(1, audio_.spectrumSize());
         waterfall_.init(binCount2, reinitH);
     }
 }
 
-// ── Math channels ────────────────────────────────────────────────────────────
-
-void Application::computeMathChannels() {
-    int nPhys = totalNumSpectra();
-    int specSz = analyzer_.spectrumSize();
-    mathSpectra_.resize(mathChannels_.size());
-
-    for (size_t mi = 0; mi < mathChannels_.size(); ++mi) {
-        const auto& mc = mathChannels_[mi];
-        auto& out = mathSpectra_[mi];
-        out.resize(specSz);
-
-        if (!mc.enabled) {
-            std::fill(out.begin(), out.end(), -200.0f);
-            continue;
-        }
-
-        int sx = std::clamp(mc.sourceX, 0, nPhys - 1);
-        int sy = std::clamp(mc.sourceY, 0, nPhys - 1);
-        const auto& xDB = getSpectrum(sx);
-        const auto& yDB = getSpectrum(sy);
-        const auto& xC  = getComplex(sx);
-        const auto& yC  = getComplex(sy);
-
-        for (int i = 0; i < specSz; ++i) {
-            float val = -200.0f;
-            switch (mc.op) {
-                // ── Unary ──
-                case MathOp::Negate:
-                    val = -xDB[i];
-                    break;
-                case MathOp::Absolute:
-                    val = std::abs(xDB[i]);
-                    break;
-                case MathOp::Square:
-                    val = 2.0f * xDB[i];
-                    break;
-                case MathOp::Cube:
-                    val = 3.0f * xDB[i];
-                    break;
-                case MathOp::Sqrt:
-                    val = 0.5f * xDB[i];
-                    break;
-                case MathOp::Log: {
-                    // log10 of linear magnitude, back to dB-like scale.
-                    float lin = std::pow(10.0f, xDB[i] / 10.0f);
-                    float l = std::log10(lin + 1e-30f);
-                    val = 10.0f * l;  // keep in dB-like range
-                    break;
-                }
-                // ── Binary ──
-                case MathOp::Add: {
-                    float lx = std::pow(10.0f, xDB[i] / 10.0f);
-                    float ly = std::pow(10.0f, yDB[i] / 10.0f);
-                    float s = lx + ly;
-                    val = (s > 1e-20f) ? 10.0f * std::log10(s) : -200.0f;
-                    break;
-                }
-                case MathOp::Subtract: {
-                    float lx = std::pow(10.0f, xDB[i] / 10.0f);
-                    float ly = std::pow(10.0f, yDB[i] / 10.0f);
-                    float d = std::abs(lx - ly);
-                    val = (d > 1e-20f) ? 10.0f * std::log10(d) : -200.0f;
-                    break;
-                }
-                case MathOp::Multiply:
-                    val = xDB[i] + yDB[i];
-                    break;
-                case MathOp::Phase: {
-                    if (i < static_cast<int>(xC.size()) &&
-                        i < static_cast<int>(yC.size())) {
-                        auto cross = xC[i] * std::conj(yC[i]);
-                        float deg = std::atan2(cross.imag(), cross.real())
-                                    * (180.0f / 3.14159265f);
-                        // Map [-180, 180] degrees into the dB display range
-                        // so it's visible on the plot.
-                        val = deg;
-                    }
-                    break;
-                }
-                case MathOp::CrossCorr: {
-                    if (i < static_cast<int>(xC.size()) &&
-                        i < static_cast<int>(yC.size())) {
-                        auto cross = xC[i] * std::conj(yC[i]);
-                        float mag2 = std::norm(cross);
-                        val = (mag2 > 1e-20f) ? 10.0f * std::log10(mag2) : -200.0f;
-                    }
-                    break;
-                }
-                default: break;
-            }
-            out[i] = val;
-        }
-    }
-}
+// ── Math panel ───────────────────────────────────────────────────────────────
 
 void Application::renderMathPanel() {
-    int nPhys = totalNumSpectra();
+    int nPhys = audio_.totalNumSpectra();
+    auto& mathChannels = audio_.mathChannels();
 
-    // Build source channel name list.
     static const char* chNames[] = {
         "Ch 0 (L)", "Ch 1 (R)", "Ch 2", "Ch 3", "Ch 4", "Ch 5", "Ch 6", "Ch 7"
     };
 
-    // List existing math channels.
     int toRemove = -1;
-    for (int mi = 0; mi < static_cast<int>(mathChannels_.size()); ++mi) {
-        auto& mc = mathChannels_[mi];
+    for (int mi = 0; mi < static_cast<int>(mathChannels.size()); ++mi) {
+        auto& mc = mathChannels[mi];
         ImGui::PushID(1000 + mi);
 
         ImGui::Checkbox("##en", &mc.enabled);
         ImGui::SameLine();
-        ImGui::ColorEdit3("##col", &mc.color.x, ImGuiColorEditFlags_NoInputs);
+        ImGui::ColorEdit3("##col", mc.color, ImGuiColorEditFlags_NoInputs);
         ImGui::SameLine();
 
-        // Operation combo.
         if (ImGui::BeginCombo("##op", mathOpName(mc.op), ImGuiComboFlags_NoPreview)) {
             for (int o = 0; o < static_cast<int>(MathOp::Count); ++o) {
                 auto op = static_cast<MathOp>(o);
@@ -1846,11 +1477,9 @@ void Application::renderMathPanel() {
         ImGui::SameLine();
         ImGui::Text("%s", mathOpName(mc.op));
 
-        // Source X.
         ImGui::SetNextItemWidth(80);
         ImGui::Combo("X", &mc.sourceX, chNames, std::min(nPhys, kMaxChannels));
 
-        // Source Y (only for binary ops).
         if (mathOpIsBinary(mc.op)) {
             ImGui::SameLine();
             ImGui::SetNextItemWidth(80);
@@ -1869,8 +1498,10 @@ void Application::renderMathPanel() {
     }
 
     if (toRemove >= 0)
-        mathChannels_.erase(mathChannels_.begin() + toRemove);
+        mathChannels.erase(mathChannels.begin() + toRemove);
 }
+
+// ── Config persistence ──────────────────────────────────────────────────────
 
 void Application::loadConfig() {
     config_.load();
@@ -1899,18 +1530,19 @@ void Application::loadConfig() {
     spectrumFrac_ = std::clamp(spectrumFrac_, 0.1f, 0.9f);
 
     // Restore device selection.
-    multiDeviceMode_ = config_.getBool("multi_device", false);
+    const auto& devices = audio_.devices();
+    audio_.setMultiDeviceMode(config_.getBool("multi_device", false));
     std::string devName = config_.getString("device_name", "");
     if (!devName.empty()) {
-        for (int i = 0; i < static_cast<int>(paDevices_.size()); ++i) {
-            if (paDevices_[i].name == devName) {
-                paDeviceIdx_ = i;
+        for (int i = 0; i < static_cast<int>(devices.size()); ++i) {
+            if (devices[i].name == devName) {
+                audio_.setDeviceIdx(i);
                 break;
             }
         }
     }
     // Restore multi-device selections from comma-separated device names.
-    std::memset(paDeviceSelected_, 0, sizeof(paDeviceSelected_));
+    audio_.clearDeviceSelections();
     std::string multiNames = config_.getString("multi_device_names", "");
     if (!multiNames.empty()) {
         size_t pos = 0;
@@ -1918,23 +1550,27 @@ void Application::loadConfig() {
             size_t comma = multiNames.find(',', pos);
             if (comma == std::string::npos) comma = multiNames.size();
             std::string name = multiNames.substr(pos, comma - pos);
-            for (int i = 0; i < std::min(static_cast<int>(paDevices_.size()), kMaxChannels); ++i) {
-                if (paDevices_[i].name == name)
-                    paDeviceSelected_[i] = true;
+            for (int i = 0; i < std::min(static_cast<int>(devices.size()), kMaxChannels); ++i) {
+                if (devices[i].name == name)
+                    audio_.setDeviceSelected(i, true);
             }
             pos = comma + 1;
         }
     }
 
     // Apply
-    settings_.fftSize = kFFTSizes[fftSizeIdx_];
-    settings_.overlap = overlapPct_ / 100.0f;
-    settings_.window  = static_cast<WindowType>(windowIdx_);
+    auto& settings = audio_.settings();
+    settings.fftSize = kFFTSizes[fftSizeIdx_];
+    settings.overlap = overlapPct_ / 100.0f;
+    settings.window  = static_cast<WindowType>(windowIdx_);
     colorMap_.setType(static_cast<ColorMapType>(colorMapIdx_));
     SDL_GL_SetSwapInterval(vsync_ ? 1 : 0);
 }
 
 void Application::saveConfig() const {
+    const auto& settings = audio_.settings();
+    const auto& devices  = audio_.devices();
+
     Config cfg;
     cfg.setInt("fft_size_idx", fftSizeIdx_);
     cfg.setFloat("overlap_pct", overlapPct_);
@@ -1953,16 +1589,16 @@ void Application::saveConfig() const {
     cfg.setFloat("trace_min_freq", measurements_.traceMinFreq);
     cfg.setFloat("trace_max_freq", measurements_.traceMaxFreq);
 
-    if (paDeviceIdx_ >= 0 && paDeviceIdx_ < static_cast<int>(paDevices_.size()))
-        cfg.setString("device_name", paDevices_[paDeviceIdx_].name);
+    int devIdx = audio_.deviceIdx();
+    if (devIdx >= 0 && devIdx < static_cast<int>(devices.size()))
+        cfg.setString("device_name", devices[devIdx].name);
 
-    cfg.setBool("multi_device", multiDeviceMode_);
-    // Save multi-device selections as comma-separated names.
+    cfg.setBool("multi_device", audio_.multiDeviceMode());
     std::string multiNames;
-    for (int i = 0; i < std::min(static_cast<int>(paDevices_.size()), kMaxChannels); ++i) {
-        if (paDeviceSelected_[i]) {
+    for (int i = 0; i < std::min(static_cast<int>(devices.size()), kMaxChannels); ++i) {
+        if (audio_.deviceSelected(i)) {
             if (!multiNames.empty()) multiNames += ',';
-            multiNames += paDevices_[i].name;
+            multiNames += devices[i].name;
         }
     }
     cfg.setString("multi_device_names", multiNames);

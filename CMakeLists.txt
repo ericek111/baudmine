@@ -47,6 +47,7 @@ set(SOURCES
     src/dsp/SpectrumAnalyzer.cpp
     src/audio/MiniAudioSource.cpp
     src/audio/FileSource.cpp
+    src/audio/AudioEngine.cpp
     src/ui/ColorMap.cpp
     src/ui/WaterfallDisplay.cpp
     src/ui/SpectrumDisplay.cpp

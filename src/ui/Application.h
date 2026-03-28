@@ -2,9 +2,7 @@
 
 #include "core/Types.h"
 #include "core/Config.h"
-#include "dsp/SpectrumAnalyzer.h"
-#include "audio/AudioSource.h"
-#include "audio/MiniAudioSource.h"
+#include "audio/AudioEngine.h"
 #include "ui/ColorMap.h"
 #include "ui/WaterfallDisplay.h"
 #include "ui/SpectrumDisplay.h"
@@ -12,61 +10,10 @@
 #include "ui/Measurements.h"
 
 #include <SDL.h>
-#include <complex>
-#include <memory>
 #include <string>
 #include <vector>
 
 namespace baudmine {
-
-// ── Channel math operations ──────────────────────────────────────────────────
-
-enum class MathOp {
-    // Unary (on channel X)
-    Negate,       // -x  (negate dB)
-    Absolute,     // |x| (absolute value of dB)
-    Square,       // x^2 in linear  → 2*x_dB
-    Cube,         // x^3 in linear  → 3*x_dB
-    Sqrt,         // sqrt in linear → 0.5*x_dB
-    Log,          // 10*log10(10^(x_dB/10) + 1)  — compressed scale
-    // Binary (on channels X and Y)
-    Add,          // linear(x) + linear(y)  → dB
-    Subtract,     // |linear(x) - linear(y)| → dB
-    Multiply,     // x_dB + y_dB  (multiply in linear = add in dB)
-    Phase,        // angle(X_cplx * conj(Y_cplx)) in degrees
-    CrossCorr,    // |X_cplx * conj(Y_cplx)| → dB
-    Count
-};
-
-inline bool mathOpIsBinary(MathOp op) {
-    return op >= MathOp::Add;
-}
-
-inline const char* mathOpName(MathOp op) {
-    switch (op) {
-        case MathOp::Negate:    return "-x";
-        case MathOp::Absolute:  return "|x|";
-        case MathOp::Square:    return "x^2";
-        case MathOp::Cube:      return "x^3";
-        case MathOp::Sqrt:      return "sqrt(x)";
-        case MathOp::Log:       return "log(x)";
-        case MathOp::Add:       return "x + y";
-        case MathOp::Subtract:  return "x - y";
-        case MathOp::Multiply:  return "x * y";
-        case MathOp::Phase:     return "phase(x,y)";
-        case MathOp::CrossCorr: return "xcorr(x,y)";
-        default:                return "?";
-    }
-}
-
-struct MathChannel {
-    MathOp op        = MathOp::Subtract;
-    int    sourceX   = 0;
-    int    sourceY   = 1;
-    ImVec4 color     = {1.0f, 1.0f, 1.0f, 1.0f};
-    bool   enabled   = true;
-    bool   waterfall = false;  // include on waterfall overlay
-};
 
 class Application {
 public:
@@ -86,11 +33,10 @@ private:
     void renderWaterfallPanel();
     void handleSpectrumInput(float posX, float posY, float sizeX, float sizeY);
 
-    void openPortAudio();
+    void openDevice();
     void openMultiDevice();
     void openFile(const std::string& path, InputFormat format, double sampleRate);
     void updateAnalyzerSettings();
-    void computeMathChannels();
     void renderMathPanel();
 
     void loadConfig();
@@ -101,28 +47,8 @@ private:
     SDL_GLContext  glContext_ = nullptr;
     bool           running_  = false;
 
-    // Audio
-    std::unique_ptr<AudioSource> audioSource_;
-    std::vector<float>           audioBuf_;     // temp read buffer
-
-    // Extra devices (multi-device mode): each gets its own source + analyzer.
-    struct ExtraDevice {
-        std::unique_ptr<AudioSource> source;
-        SpectrumAnalyzer             analyzer;
-        std::vector<float>           audioBuf;
-    };
-    std::vector<std::unique_ptr<ExtraDevice>> extraDevices_;
-
-    // Helpers to present a unified channel view across all analyzers.
-    int totalNumSpectra() const;
-    const std::vector<float>& getSpectrum(int globalCh) const;
-    const std::vector<std::complex<float>>& getComplex(int globalCh) const;
-    // Returns the device name that owns a given global channel index.
-    const char* getDeviceName(int globalCh) const;
-
-    // DSP
-    SpectrumAnalyzer analyzer_;
-    AnalyzerSettings settings_;
+    // Audio engine (owns sources, analyzers, math channels)
+    AudioEngine audio_;
 
     // UI state
     ColorMap          colorMap_;
@@ -145,8 +71,6 @@ private:
     void      applyUIScale(float scale);
     void      requestUIScale(float scale); // safe to call mid-frame
     void      syncCanvasSize();
-    // (waterfallW_ removed — texture width tracks bin count automatically)
-    // (waterfallH_ removed — fixed history depth of 1024 rows)
 
     // FFT size options
     static constexpr int kFFTSizes[] = {256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536};
@@ -168,13 +92,7 @@ private:
     float       fileSampleRate_ = 48000.0f;
     bool        fileLoop_ = true;
 
-    // Device selection
-    std::vector<MiniAudioSource::DeviceInfo> paDevices_;
-    int paDeviceIdx_ = 0;
-    bool paDeviceSelected_[kMaxChannels] = {};  // multi-device checkboxes
-    bool multiDeviceMode_ = false;              // true = use multiple devices as channels
-
-    // Channel colors (up to kMaxChannels).  Defaults: L=purple, R=green.
+    // Channel colors (up to kMaxChannels).  Defaults: L=green, R=purple.
     ImVec4 channelColors_[kMaxChannels] = {
         {0.20f, 0.90f, 0.30f, 1.0f},  // green
         {0.70f, 0.30f, 1.00f, 1.0f},  // purple
@@ -188,10 +106,6 @@ private:
     int  waterfallChannel_ = 0;    // which channel drives the waterfall (single mode)
     bool waterfallMultiCh_ = true; // true = multi-channel overlay mode
     bool channelEnabled_[kMaxChannels] = {true,true,true,true,true,true,true,true};
-
-    // Math channels
-    std::vector<MathChannel>          mathChannels_;
-    std::vector<std::vector<float>>   mathSpectra_;  // computed each frame
 
     // Frequency zoom/pan (normalized 0–1 over full bandwidth)
     float viewLo_ = 0.0f;   // left edge
