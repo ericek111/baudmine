@@ -467,6 +467,9 @@ void Application::render() {
         if (ImGui::BeginMenu("View")) {
             ImGui::MenuItem("Grid", nullptr, &specDisplay_.showGrid);
             ImGui::MenuItem("Fill Spectrum", nullptr, &specDisplay_.fillSpectrum);
+            ImGui::MenuItem("Additive Blend", nullptr, &specDisplay_.additiveBlend);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Mix multi-channel spectrum colors additively");
             ImGui::Separator();
             if (ImGui::MenuItem("VSync", nullptr, &vsync_)) {
                 SDL_GL_SetSwapInterval(vsync_ ? 1 : 0);
@@ -669,6 +672,7 @@ void Application::loadConfig() {
     showSidebar_                  = config_.getBool("show_sidebar", showSidebar_);
     specDisplay_.peakHoldEnable   = config_.getBool("peak_hold", specDisplay_.peakHoldEnable);
     specDisplay_.peakHoldDecay    = config_.getFloat("peak_hold_decay", specDisplay_.peakHoldDecay);
+    specDisplay_.additiveBlend    = config_.getBool("additive_blend", specDisplay_.additiveBlend);
     cursors_.snapToPeaks          = config_.getBool("snap_to_peaks", cursors_.snapToPeaks);
     measurements_.traceMinFreq    = config_.getFloat("trace_min_freq", measurements_.traceMinFreq);
     measurements_.traceMaxFreq    = config_.getFloat("trace_max_freq", measurements_.traceMaxFreq);
@@ -732,6 +736,7 @@ void Application::saveConfig() const {
     cfg.setBool("show_sidebar", showSidebar_);
     cfg.setBool("peak_hold", specDisplay_.peakHoldEnable);
     cfg.setFloat("peak_hold_decay", specDisplay_.peakHoldDecay);
+    cfg.setBool("additive_blend", specDisplay_.additiveBlend);
     cfg.setBool("snap_to_peaks", cursors_.snapToPeaks);
     cfg.setFloat("trace_min_freq", measurements_.traceMinFreq);
     cfg.setFloat("trace_max_freq", measurements_.traceMaxFreq);

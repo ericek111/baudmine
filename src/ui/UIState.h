@@ -18,15 +18,16 @@ struct UIState {
     int  waterfallChannel = 0;
     bool waterfallMultiCh = true;
     std::array<bool, kMaxChannels> channelEnabled = {true,true,true,true,true,true,true,true};
+    // Complementary pairs: colors at indices 0+1, 2+3, 4+5, 6+7 sum to white.
     std::array<ImVec4, kMaxChannels> channelColors = {{
-        {0.20f, 0.90f, 0.30f, 1.0f},  // green
-        {0.70f, 0.30f, 1.00f, 1.0f},  // purple
+        {0.20f, 0.90f, 0.20f, 1.0f},  // green
+        {0.80f, 0.10f, 0.80f, 1.0f},  // purple
         {1.00f, 0.55f, 0.00f, 1.0f},  // orange
-        {0.00f, 0.75f, 1.00f, 1.0f},  // cyan
+        {0.00f, 0.45f, 1.00f, 1.0f},  // cyan
         {1.00f, 0.25f, 0.25f, 1.0f},  // red
-        {1.00f, 1.00f, 0.30f, 1.0f},  // yellow
-        {0.50f, 0.80f, 0.50f, 1.0f},  // light green
-        {0.80f, 0.50f, 0.80f, 1.0f},  // pink
+        {0.00f, 0.75f, 0.75f, 1.0f},  // teal
+        {1.00f, 1.00f, 0.20f, 1.0f},  // yellow
+        {0.00f, 0.00f, 0.80f, 1.0f},  // blue
     }};
 };
 

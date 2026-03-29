@@ -2,7 +2,21 @@
 #include <cmath>
 #include <algorithm>
 
+#ifdef __EMSCRIPTEN__
+#include <GLES2/gl2.h>
+#else
+#include <GL/gl.h>
+#endif
+
 namespace baudmine {
+
+// ImGui draw-list callbacks to switch GL blend mode for additive color mixing.
+static void setAdditiveBlend(const ImDrawList*, const ImDrawCmd*) {
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+}
+static void restoreDefaultBlend(const ImDrawList*, const ImDrawCmd*) {
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+}
 
 static float freqToLogFrac(double freq, double minFreq, double maxFreq) {
     if (freq <= 0 || minFreq <= 0) return 0.0f;
@@ -152,52 +166,75 @@ void SpectrumDisplay::draw(const std::vector<std::vector<float>>& spectra,
         }
     }
 
-    // Draw each channel's spectrum.
-    std::vector<ImVec2> points;
+    // Build polylines for all channels.
     int nCh = static_cast<int>(spectra.size());
+    std::vector<std::vector<ImVec2>> allPoints(nCh);
     for (int ch = 0; ch < nCh; ++ch) {
         if (spectra[ch].empty()) continue;
-        const ChannelStyle& st = (ch < static_cast<int>(styles.size()))
-            ? styles[ch]
-            : styles.back();
-
         buildPolyline(spectra[ch], minDB, maxDB,
                       isIQ, freqScale, posX, posY, sizeX, sizeY,
-                      viewLo, viewHi, points);
+                      viewLo, viewHi, allPoints[ch]);
+    }
 
-        // Fill
-        if (fillSpectrum && points.size() >= 2) {
-            for (size_t i = 0; i + 1 < points.size(); ++i) {
-                ImVec2 tl = points[i];
-                ImVec2 tr = points[i + 1];
-                ImVec2 bl = {tl.x, posY + sizeY};
-                ImVec2 br = {tr.x, posY + sizeY};
-                dl->AddQuadFilled(tl, tr, br, bl, st.fillColor);
+    // Draw spectra: all fills first, then all lines on top.
+    // Multi-channel uses additive GL blending so colors mix (green + purple = white).
+    {
+        bool additive = additiveBlend && nCh > 1;
+        // Use lower alpha under additive blend to avoid oversaturation.
+        constexpr ImU8 kLineAlpha = 180;
+        constexpr ImU8 kFillAlpha = 30;
+
+        if (additive)
+            dl->AddCallback(setAdditiveBlend, nullptr);
+
+        // Pass 1: fills (drawn first so lines sit on top of all fills).
+        if (fillSpectrum) {
+            for (int ch = 0; ch < nCh; ++ch) {
+                const auto& pts = allPoints[ch];
+                if (pts.size() < 2) continue;
+                const ChannelStyle& st = (ch < static_cast<int>(styles.size()))
+                    ? styles[ch] : styles.back();
+                ImU32 col = additive
+                    ? ((st.fillColor & 0x00FFFFFF) | (static_cast<ImU32>(kFillAlpha) << 24))
+                    : st.fillColor;
+                for (size_t i = 0; i + 1 < pts.size(); ++i) {
+                    dl->AddQuadFilled(pts[i], pts[i + 1],
+                                      {pts[i + 1].x, posY + sizeY},
+                                      {pts[i].x, posY + sizeY}, col);
+                }
             }
         }
 
-        // Line
-        if (points.size() >= 2)
-            dl->AddPolyline(points.data(), static_cast<int>(points.size()),
-                            st.lineColor, ImDrawFlags_None, 1.5f);
+        // Pass 2: lines.
+        for (int ch = 0; ch < nCh; ++ch) {
+            const auto& pts = allPoints[ch];
+            if (pts.size() < 2) continue;
+            const ChannelStyle& st = (ch < static_cast<int>(styles.size()))
+                ? styles[ch] : styles.back();
+            ImU32 col = additive
+                ? ((st.lineColor & 0x00FFFFFF) | (static_cast<ImU32>(kLineAlpha) << 24))
+                : st.lineColor;
+            dl->AddPolyline(pts.data(), static_cast<int>(pts.size()),
+                            col, ImDrawFlags_None, 1.5f);
+        }
+
+        if (additive)
+            dl->AddCallback(restoreDefaultBlend, nullptr);
     }
 
-    // Peak hold traces (drawn as dashed-style thin lines above the live spectrum).
+    // Peak hold traces.
     if (peakHoldEnable && !peakHold_.empty()) {
+        std::vector<ImVec2> phPoints;
         for (int ch = 0; ch < nCh && ch < static_cast<int>(peakHold_.size()); ++ch) {
             if (peakHold_[ch].empty()) continue;
             const ChannelStyle& st = (ch < static_cast<int>(styles.size()))
                 ? styles[ch] : styles.back();
-
-            // Use the same line color but dimmer.
             ImU32 col = (st.lineColor & 0x00FFFFFF) | 0x90000000;
-
             buildPolyline(peakHold_[ch], minDB, maxDB,
                           isIQ, freqScale, posX, posY, sizeX, sizeY,
-                          viewLo, viewHi, points);
-
-            if (points.size() >= 2)
-                dl->AddPolyline(points.data(), static_cast<int>(points.size()),
+                          viewLo, viewHi, phPoints);
+            if (phPoints.size() >= 2)
+                dl->AddPolyline(phPoints.data(), static_cast<int>(phPoints.size()),
                                 col, ImDrawFlags_None, 1.0f);
         }
     }

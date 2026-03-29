@@ -46,6 +46,7 @@ public:
 
     bool  showGrid       = true;
     bool  fillSpectrum   = false;
+    bool  additiveBlend  = true;   // additive color mixing for multi-channel
     bool  peakHoldEnable = false;
     float peakHoldDecay  = 20.0f;  // dB/second decay rate
 

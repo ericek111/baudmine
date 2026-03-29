@@ -9,7 +9,7 @@
 namespace baudmine {
 
 namespace {
-constexpr float kLinearEpsilon = kLinearEpsilon;  // threshold for log10 of linear power
+constexpr float kLinearEpsilon = 1e-20f;  // threshold for log10 of linear power
 constexpr float kLogGuard      = 1e-30f;  // guard against log10(0) in compressed scale
 } // namespace
 
