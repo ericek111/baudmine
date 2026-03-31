@@ -1,0 +1,90 @@
+name: Build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  linux:
+    name: Linux (static)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake pkg-config \
+            libsdl2-dev libfftw3-dev libsndfile1-dev \
+            libgl-dev
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS_RELEASE="-O3 -march=haswell -DNDEBUG"
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: baudmine-linux
+          path: build/baudmine
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install vcpkg dependencies
+        run: |
+          vcpkg install sdl2 fftw3 libsndfile --triplet x64-windows
+
+      - name: Configure
+        run: >
+          cmake -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=x64-windows
+          -DCMAKE_CXX_FLAGS="/O2 /arch:AVX2 /DNDEBUG"
+          -DCMAKE_C_FLAGS="/O2 /arch:AVX2 /DNDEBUG"
+
+      - name: Build
+        run: cmake --build build --config Release -j $env:NUMBER_OF_PROCESSORS
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: baudmine-windows
+          path: |
+            build/Release/baudmine.exe
+            build/Release/*.dll
+
+  wasm:
+    name: Web (WASM)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 5.0.4
+
+      - name: Configure
+        run: emcmake cmake -B build_wasm -C CMakeLists_wasm.cmake -Wno-dev
+
+      - name: Build
+        run: cmake --build build_wasm -j$(nproc)
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: baudmine-web
+          path: |
+            build_wasm/web/baudmine.html
+            build_wasm/web/baudmine.js
+            build_wasm/web/baudmine.wasm
