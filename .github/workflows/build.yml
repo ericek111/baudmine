@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main, master]
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
 jobs:
   linux:
     name: Linux (static)
@@ -88,3 +93,30 @@ jobs:
             build_wasm/web/baudmine.html
             build_wasm/web/baudmine.js
             build_wasm/web/baudmine.wasm
+
+      - name: Prepare Pages
+        if: github.event_name == 'push'
+        run: |
+          mkdir -p _site
+          cp build_wasm/web/baudmine.html _site/index.html
+          cp build_wasm/web/baudmine.js   _site/
+          cp build_wasm/web/baudmine.wasm _site/
+
+      - name: Upload Pages artifact
+        if: github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: wasm
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
