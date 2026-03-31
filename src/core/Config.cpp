@@ -2,6 +2,9 @@
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
+#ifndef __EMSCRIPTEN__
+#include <filesystem>
+#endif
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -22,7 +25,6 @@ EM_JS(void, js_saveSettings, (const char* data), {
 });
 
 #else
-#include <sys/stat.h>
 #endif
 
 namespace baudmine {
@@ -30,16 +32,20 @@ namespace baudmine {
 std::string Config::defaultPath() {
 #ifdef __EMSCRIPTEN__
     return "";
+#elif defined(_WIN32)
+    const char* appdata = std::getenv("APPDATA");
+    auto base = std::filesystem::path(appdata ? appdata : ".");
+    return (base / "baudmine" / "settings.ini").string();
 #else
     const char* xdg = std::getenv("XDG_CONFIG_HOME");
-    std::string base;
+    std::filesystem::path base;
     if (xdg && xdg[0]) {
         base = xdg;
     } else {
         const char* home = std::getenv("HOME");
-        base = home ? std::string(home) + "/.config" : ".";
+        base = home ? std::filesystem::path(home) / ".config" : std::filesystem::path(".");
     }
-    return base + "/baudmine/settings.ini";
+    return (base / "baudmine" / "settings.ini").string();
 #endif
 }
 
@@ -77,19 +83,9 @@ bool Config::load(const std::string& path) {
 
 #ifndef __EMSCRIPTEN__
 static void ensureDir(const std::string& path) {
-    // Create parent directories.
-    auto lastSlash = path.rfind('/');
-    if (lastSlash == std::string::npos) return;
-    std::string dir = path.substr(0, lastSlash);
-    // Simple recursive mkdir.
-    for (size_t i = 1; i < dir.size(); ++i) {
-        if (dir[i] == '/') {
-            dir[i] = '\0';
-            mkdir(dir.c_str(), 0755);
-            dir[i] = '/';
-        }
-    }
-    mkdir(dir.c_str(), 0755);
+    std::filesystem::path p(path);
+    if (p.has_parent_path())
+        std::filesystem::create_directories(p.parent_path());
 }
 #endif
 
