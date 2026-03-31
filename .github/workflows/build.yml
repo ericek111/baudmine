@@ -44,6 +44,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_INSTALLATION_ROOT }}/installed
+          key: vcpkg-x64-windows-${{ hashFiles('.github/workflows/build.yml') }}
+          restore-keys: vcpkg-x64-windows-
+
       - name: Install vcpkg dependencies
         run: |
           vcpkg install sdl2 fftw3 "libsndfile[core]" --triplet x64-windows
