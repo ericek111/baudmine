@@ -4,6 +4,9 @@
 
 #ifdef __EMSCRIPTEN__
 #include <GLES2/gl2.h>
+#elif defined(_WIN32)
+#include <windows.h>
+#include <GL/gl.h>
 #else
 #include <GL/gl.h>
 #endif

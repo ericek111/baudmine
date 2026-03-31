@@ -46,7 +46,7 @@ jobs:
 
       - name: Install vcpkg dependencies
         run: |
-          vcpkg install sdl2 fftw3 libsndfile --triplet x64-windows
+          vcpkg install sdl2 fftw3 "libsndfile[core]" --triplet x64-windows
 
       - name: Configure
         run: >

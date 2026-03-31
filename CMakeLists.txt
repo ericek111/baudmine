@@ -180,32 +180,47 @@ if(EMSCRIPTEN)
 else()
     # ── Native Build ─────────────────────────────────────────────────────────
 
-    set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -DNDEBUG")
-    set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -fsanitize=address,undefined")
+    if(MSVC)
+        set(CMAKE_CXX_FLAGS_RELEASE "/O2 /DNDEBUG")
+        set(CMAKE_CXX_FLAGS_DEBUG "/Zi /Od")
+    else()
+        set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -DNDEBUG")
+        set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -fsanitize=address,undefined")
+    endif()
 
-    find_package(PkgConfig REQUIRED)
     find_package(OpenGL REQUIRED)
 
-    pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
-    pkg_check_modules(FFTW3F REQUIRED IMPORTED_TARGET fftw3f)
-    pkg_check_modules(SNDFILE REQUIRED IMPORTED_TARGET sndfile)
+    if(MSVC)
+        find_package(SDL2 CONFIG REQUIRED)
+        find_package(FFTW3f CONFIG REQUIRED)
+        find_package(SndFile CONFIG REQUIRED)
 
-    target_link_libraries(imgui PUBLIC PkgConfig::SDL2 OpenGL::GL)
+        target_link_libraries(imgui PUBLIC SDL2::SDL2 OpenGL::GL)
 
-    add_executable(baudmine ${SOURCES})
-    target_include_directories(baudmine PRIVATE src)
-    target_link_libraries(baudmine PRIVATE
-        imgui
-        PkgConfig::SDL2
-        PkgConfig::FFTW3F
-        PkgConfig::SNDFILE
-        OpenGL::GL
-        pthread
-    )
+        add_executable(baudmine ${SOURCES})
+        target_include_directories(baudmine PRIVATE src)
+        target_link_libraries(baudmine PRIVATE
+            imgui SDL2::SDL2 SDL2::SDL2main
+            FFTW3::fftw3f SndFile::sndfile OpenGL::GL
+        )
+    else()
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
+        pkg_check_modules(FFTW3F REQUIRED IMPORTED_TARGET fftw3f)
+        pkg_check_modules(SNDFILE REQUIRED IMPORTED_TARGET sndfile)
 
-    # Link math library and dl on Unix (dl needed by miniaudio for backend loading)
-    if(UNIX)
-        target_link_libraries(baudmine PRIVATE m dl)
+        target_link_libraries(imgui PUBLIC PkgConfig::SDL2 OpenGL::GL)
+
+        add_executable(baudmine ${SOURCES})
+        target_include_directories(baudmine PRIVATE src)
+        target_link_libraries(baudmine PRIVATE
+            imgui PkgConfig::SDL2 PkgConfig::FFTW3F
+            PkgConfig::SNDFILE OpenGL::GL pthread
+        )
+
+        if(UNIX)
+            target_link_libraries(baudmine PRIVATE m dl)
+        endif()
     endif()
 
 endif()

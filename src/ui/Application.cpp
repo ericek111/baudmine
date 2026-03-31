@@ -30,6 +30,9 @@ EM_JS(void, js_clearCanvasInlineSize, (), {
     if (c) { c.style.width = ''; c.style.height = ''; }
 });
 
+#elif defined(_WIN32)
+#include <windows.h>
+#include <GL/gl.h>
 #else
 #include <GL/gl.h>
 #endif
