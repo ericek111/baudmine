@@ -8,6 +8,9 @@
 #include <windows.h>
 #endif
 #include <GL/gl.h>
+#ifndef GL_CLAMP_TO_EDGE // for Windows
+#define GL_CLAMP_TO_EDGE 0x812F
+#endif
 #include <vector>
 #include <deque>
 
