@@ -316,6 +316,10 @@ void Application::processAudio() {
 
         // Push ALL new spectra to the waterfall so that the scroll rate
         // is determined by the audio sample rate, not the display refresh.
+        int curCh = std::clamp(ui_.waterfallChannel, 0, nSpec - 1);
+        const auto& traceHist = audio_.getWaterfallHistory(curCh);
+        int traceHistSz = static_cast<int>(traceHist.size());
+
         if (ui_.waterfallMultiCh && nSpec > 1) {
             // For multi-channel: replay the last spectraThisFrame entries
             // from channel 0's history to get per-step data.  Other
@@ -353,16 +357,22 @@ void Application::processAudio() {
                     }
                 }
                 waterfall_.pushLineMulti(wfSpectra, wfInfo, ui_.minDB, ui_.maxDB);
+
+                // Push peak trace entry synchronized with each waterfall line.
+                int tIdx = std::max(0, traceHistSz - (histSz - si));
+                measurements_.pushPeakTrace(traceHist[tIdx],
+                                            settings.sampleRate, settings.isIQ, settings.fftSize);
             }
         } else {
-            int wfCh = std::clamp(ui_.waterfallChannel, 0, nSpec - 1);
-            const auto& hist = audio_.getWaterfallHistory(wfCh);
+            const auto& hist = audio_.getWaterfallHistory(curCh);
             int histSz = static_cast<int>(hist.size());
             int start = std::max(0, histSz - spectraThisFrame);
-            for (int si = start; si < histSz; ++si)
+            for (int si = start; si < histSz; ++si) {
                 waterfall_.pushLine(hist[si], ui_.minDB, ui_.maxDB);
+                measurements_.pushPeakTrace(hist[si],
+                                            settings.sampleRate, settings.isIQ, settings.fftSize);
+            }
         }
-        int curCh = std::clamp(ui_.waterfallChannel, 0, nSpec - 1);
         cursors_.update(audio_.getSpectrum(curCh),
                        settings.sampleRate, settings.isIQ, settings.fftSize);
         measurements_.update(audio_.getSpectrum(curCh),

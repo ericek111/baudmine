@@ -61,6 +61,38 @@ void Measurements::findPeaks(const std::vector<float>& spectrumDB, int maxN,
     }
 }
 
+void Measurements::pushPeakTrace(const std::vector<float>& spectrumDB,
+                                  double sampleRate, bool isIQ, int fftSize) {
+    if (spectrumDB.empty()) return;
+
+    constexpr int kMaxHistory = 4096;
+    if (static_cast<int>(peakHistBins_.size()) < kMaxHistory)
+        peakHistBins_.resize(kMaxHistory, -1);
+
+    auto it = std::max_element(spectrumDB.begin(), spectrumDB.end());
+    int traceBin = static_cast<int>(std::distance(spectrumDB.begin(), it));
+
+    // Optionally restrict to a frequency range.
+    int bins = static_cast<int>(spectrumDB.size());
+    if (traceMinFreq > 0.0f || traceMaxFreq > 0.0f) {
+        double fMin = isIQ ? -sampleRate / 2.0 : 0.0;
+        double fMax = isIQ ?  sampleRate / 2.0 : sampleRate / 2.0;
+        int loB = 0, hiB = bins - 1;
+        if (traceMinFreq > 0.0f)
+            loB = std::max(0, static_cast<int>((traceMinFreq - fMin) / (fMax - fMin) * bins));
+        if (traceMaxFreq > 0.0f)
+            hiB = std::min(bins - 1, static_cast<int>((traceMaxFreq - fMin) / (fMax - fMin) * bins));
+        if (loB <= hiB) {
+            auto rangeIt = std::max_element(spectrumDB.begin() + loB, spectrumDB.begin() + hiB + 1);
+            traceBin = static_cast<int>(std::distance(spectrumDB.begin(), rangeIt));
+        }
+    }
+
+    peakHistIdx_ = (peakHistIdx_ + 1) % kMaxHistory;
+    peakHistBins_[peakHistIdx_] = traceBin;
+    if (peakHistLen_ < kMaxHistory) ++peakHistLen_;
+}
+
 void Measurements::update(const std::vector<float>& spectrumDB,
                            double sampleRate, bool isIQ, int fftSize) {
     lastSampleRate_ = sampleRate;
@@ -71,32 +103,6 @@ void Measurements::update(const std::vector<float>& spectrumDB,
         globalPeak_.bin = bin;
         globalPeak_.dB = *it;
         globalPeak_.freq = binToFreq(bin, sampleRate, isIQ, fftSize);
-
-        // Push into peak history circular buffer (with optional freq range filter)
-        constexpr int kMaxHistory = 4096;
-        if (static_cast<int>(peakHistBins_.size()) < kMaxHistory)
-            peakHistBins_.resize(kMaxHistory, -1);
-
-        // Find peak within the trace frequency range
-        int traceBin = bin;
-        int bins = static_cast<int>(spectrumDB.size());
-        if (traceMinFreq > 0.0f || traceMaxFreq > 0.0f) {
-            double fMin = isIQ ? -sampleRate / 2.0 : 0.0;
-            double fMax = isIQ ?  sampleRate / 2.0 : sampleRate / 2.0;
-            int loB = 0, hiB = bins - 1;
-            if (traceMinFreq > 0.0f)
-                loB = std::max(0, static_cast<int>((traceMinFreq - fMin) / (fMax - fMin) * bins));
-            if (traceMaxFreq > 0.0f)
-                hiB = std::min(bins - 1, static_cast<int>((traceMaxFreq - fMin) / (fMax - fMin) * bins));
-            if (loB <= hiB) {
-                auto rangeIt = std::max_element(spectrumDB.begin() + loB, spectrumDB.begin() + hiB + 1);
-                traceBin = static_cast<int>(std::distance(spectrumDB.begin(), rangeIt));
-            }
-        }
-
-        peakHistIdx_ = (peakHistIdx_ + 1) % kMaxHistory;
-        peakHistBins_[peakHistIdx_] = traceBin;
-        if (peakHistLen_ < kMaxHistory) ++peakHistLen_;
     }
 
     if (!enabled) { peaks_.clear(); return; }

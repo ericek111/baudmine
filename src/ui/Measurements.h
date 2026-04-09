@@ -18,6 +18,10 @@ public:
     void update(const std::vector<float>& spectrumDB,
                 double sampleRate, bool isIQ, int fftSize);
 
+    // Push a single peak trace entry for this spectrum (call once per waterfall line).
+    void pushPeakTrace(const std::vector<float>& spectrumDB,
+                       double sampleRate, bool isIQ, int fftSize);
+
     // Draw markers on the spectrum display area.
     void draw(const SpectrumDisplay& specDisplay,
               float posX, float posY, float sizeX, float sizeY,
