@@ -45,6 +45,10 @@ private:
     bool needsSave_   = false;
     bool needsUpdate_ = false;
 
+    // Overrun display
+    int   lastOverrunCount_ = 0;
+    float lastOverrunTime_  = 0.0f;  // ImGui time of last overrun
+
     void flagSave()   { needsSave_ = true; }
     void flagUpdate() { needsUpdate_ = true; }
 };

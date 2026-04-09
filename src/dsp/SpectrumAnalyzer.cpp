@@ -105,7 +105,7 @@ void SpectrumAnalyzer::processBlock() {
         for (float& v : channelSpectra_[ch])
             v += windowCorrection_;
         channelWaterfalls_[ch].push_back(channelSpectra_[ch]);
-        if (channelWaterfalls_[ch].size() > kWaterfallHistory)
+        if (channelWaterfalls_[ch].size() > static_cast<size_t>(kWaterfallHistory))
             channelWaterfalls_[ch].pop_front();
     }
     newSpectrumReady_ = true;

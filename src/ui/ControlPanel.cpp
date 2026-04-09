@@ -95,6 +95,23 @@ void ControlPanel::render(AudioEngine& audio, UIState& ui,
             ImGui::GetWindowDrawList()->AddText({tx, ty}, IM_COL32(255, 255, 255, 220), overlayText);
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Overlap");
         }
+
+        // Overrun indicator
+        {
+            int overruns = audio.overrunCount();
+            float now = static_cast<float>(ImGui::GetTime());
+            if (overruns > lastOverrunCount_) {
+                lastOverrunCount_ = overruns;
+                lastOverrunTime_ = now;
+            }
+            if (overruns > 0 && (now - lastOverrunTime_) < 3.0f) {
+                ImGui::TextColored({1.0f, 0.4f, 0.4f, 1.0f},
+                                   "Input overrun: %d FFTs", overruns);
+            } else if (overruns > 0) {
+                audio.resetOverrunCount();
+                lastOverrunCount_ = 0;
+            }
+        }
     }
 
     // ── Display ──

@@ -6,6 +6,7 @@
 #include "dsp/SpectrumAnalyzer.h"
 
 #include <complex>
+#include <deque>
 #include <memory>
 #include <string>
 #include <vector>
@@ -52,7 +53,14 @@ public:
     std::vector<MathChannel>&       mathChannels()       { return mathChannels_; }
     const std::vector<MathChannel>& mathChannels() const { return mathChannels_; }
     const std::vector<std::vector<float>>& mathSpectra() const { return mathSpectra_; }
+    const std::deque<std::vector<float>>& mathWaterfallHistory(int mi) const;
     void computeMathChannels();
+
+    // ── Overrun tracking ──
+    // Counts spectra lost because more were produced in a single frame
+    // than the waterfall history deque can hold.
+    int  overrunCount() const { return overrunCount_; }
+    void resetOverrunCount()  { overrunCount_ = 0; }
 
     // ── Device selection state (for config persistence) ──
     int  deviceIdx()       const { return deviceIdx_; }
@@ -80,8 +88,12 @@ private:
     AnalyzerSettings settings_;
 
     // Math
-    std::vector<MathChannel>        mathChannels_;
-    std::vector<std::vector<float>> mathSpectra_;
+    std::vector<MathChannel>                    mathChannels_;
+    std::vector<std::vector<float>>             mathSpectra_;
+    std::vector<std::deque<std::vector<float>>> mathWaterfalls_;
+
+    // Overrun
+    int overrunCount_ = 0;
 
     // Device state
     std::vector<MiniAudioSource::DeviceInfo> devices_;

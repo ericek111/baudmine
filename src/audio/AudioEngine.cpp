@@ -147,6 +147,8 @@ void AudioEngine::clearHistory() {
     analyzer_.clearHistory();
     for (auto& ed : extraDevices_)
         ed->analyzer.clearHistory();
+    for (auto& mw : mathWaterfalls_)
+        mw.clear();
 }
 
 int AudioEngine::processAudio() {
@@ -203,6 +205,10 @@ int AudioEngine::processAudio() {
             ed->analyzer.pushSamples(ed->audioBuf.data(), framesRead);
         }
     }
+
+    // Track overruns: spectra lost because they exceeded the history capacity.
+    if (spectraThisFrame > kWaterfallHistory)
+        overrunCount_ += spectraThisFrame - kWaterfallHistory;
 
     return spectraThisFrame;
 }
@@ -294,10 +300,17 @@ const char* AudioEngine::getDeviceName(int globalCh) const {
 
 // ── Math channels ────────────────────────────────────────────────────────────
 
+const std::deque<std::vector<float>>& AudioEngine::mathWaterfallHistory(int mi) const {
+    static const std::deque<std::vector<float>> empty;
+    if (mi < 0 || mi >= static_cast<int>(mathWaterfalls_.size())) return empty;
+    return mathWaterfalls_[mi];
+}
+
 void AudioEngine::computeMathChannels() {
     int nPhys = totalNumSpectra();
     int specSz = analyzer_.spectrumSize();
     mathSpectra_.resize(mathChannels_.size());
+    mathWaterfalls_.resize(mathChannels_.size());
 
     for (size_t mi = 0; mi < mathChannels_.size(); ++mi) {
         const auto& mc = mathChannels_[mi];
@@ -368,6 +381,11 @@ void AudioEngine::computeMathChannels() {
             }
             out[i] = val;
         }
+
+        // Push to math waterfall history.
+        mathWaterfalls_[mi].push_back(out);
+        if (mathWaterfalls_[mi].size() > kWaterfallHistory)
+            mathWaterfalls_[mi].pop_front();
     }
 }
 

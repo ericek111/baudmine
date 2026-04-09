@@ -15,7 +15,7 @@ namespace baudmine {
 constexpr int kMinFFTSize = 256;
 constexpr int kMaxFFTSize = 65536;
 constexpr int kDefaultFFTSize = 4096;
-constexpr int kWaterfallHistory = 2048;
+constexpr int kWaterfallHistory = 512;
 constexpr int kDefaultWindowWidth  = 1400;
 constexpr int kDefaultWindowHeight = 900;
 

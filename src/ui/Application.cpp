@@ -334,16 +334,20 @@ void Application::processAudio() {
                     wfInfo.push_back({c.x, c.y, c.z,
                                       ui_.channelEnabled[ch % kMaxChannels]});
                 }
-                // Math channels only available for the latest spectrum;
-                // include them only on the last iteration.
-                if (si == histSz - 1) {
-                    for (size_t mi = 0; mi < mathChannels.size(); ++mi) {
-                        if (mathChannels[mi].enabled && mathChannels[mi].waterfall &&
-                            mi < mathSpectra.size()) {
-                            const auto& c = mathChannels[mi].color;
+                // Math channels: use their own waterfall history.
+                for (size_t mi = 0; mi < mathChannels.size(); ++mi) {
+                    if (mathChannels[mi].enabled && mathChannels[mi].waterfall &&
+                        mi < mathSpectra.size()) {
+                        const auto& c = mathChannels[mi].color;
+                        const auto& mHist = audio_.mathWaterfallHistory(static_cast<int>(mi));
+                        int mHistSz = static_cast<int>(mHist.size());
+                        int mIdx = std::max(0, mHistSz - (histSz - si));
+                        if (mIdx < mHistSz) {
+                            wfSpectra.push_back(mHist[mIdx]);
+                        } else {
                             wfSpectra.push_back(mathSpectra[mi]);
-                            wfInfo.push_back({c[0], c[1], c[2], true});
                         }
+                        wfInfo.push_back({c[0], c[1], c[2], true});
                     }
                 }
                 waterfall_.pushLineMulti(wfSpectra, wfInfo, ui_.minDB, ui_.maxDB);
