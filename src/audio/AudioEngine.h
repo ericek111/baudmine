@@ -42,6 +42,7 @@ public:
     // ── Unified channel view across all analyzers ──
     int totalNumSpectra() const;
     const std::vector<float>& getSpectrum(int globalCh) const;
+    const std::deque<std::vector<float>>& getWaterfallHistory(int globalCh) const;
     const std::vector<std::complex<float>>& getComplex(int globalCh) const;
     const char* getDeviceName(int globalCh) const;
     int spectrumSize() const { return analyzer_.spectrumSize(); }

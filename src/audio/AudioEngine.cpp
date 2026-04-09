@@ -2,6 +2,7 @@
 #include "audio/FileSource.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -157,19 +158,38 @@ int AudioEngine::processAudio() {
     if (hopFrames < 1) hopFrames = 1;
     audioBuf_.resize(hopFrames * channels);
 
-    constexpr int kMaxSpectraPerFrame = 8;
+    // Drain all available audio so the scroll rate is independent of the
+    // display refresh rate (vsync).  Real-time sources self-limit via their
+    // ring buffer; file sources are capped to wall-clock time so playback
+    // runs at 1× speed regardless of frame rate.
+
+    // For file sources, compute how many samples correspond to elapsed time.
+    size_t fileSampleCap = SIZE_MAX;  // unlimited for real-time
+    if (!audioSource_->isRealTime()) {
+        using Clock = std::chrono::steady_clock;
+        static Clock::time_point lastFileTime = Clock::now();
+        auto now = Clock::now();
+        double elapsed = std::chrono::duration<double>(now - lastFileTime).count();
+        lastFileTime = now;
+        // Clamp elapsed to avoid huge bursts after pauses or stalls.
+        if (elapsed > 0.1) elapsed = 0.1;
+        fileSampleCap = static_cast<size_t>(elapsed * settings_.sampleRate) + 1;
+    }
 
     // Process primary source.
     int spectraThisFrame = 0;
-    while (spectraThisFrame < kMaxSpectraPerFrame) {
+    size_t samplesRead = 0;
+    for (;;) {
+        if (samplesRead >= fileSampleCap) break;
         size_t framesRead = audioSource_->read(audioBuf_.data(), hopFrames);
         if (framesRead == 0) break;
+        samplesRead += framesRead;
         analyzer_.pushSamples(audioBuf_.data(), framesRead);
         if (analyzer_.hasNewSpectrum())
             ++spectraThisFrame;
     }
 
-    // Process extra devices independently.
+    // Process extra devices independently (always real-time).
     for (auto& ed : extraDevices_) {
         int edCh = ed->source->channels();
         const auto& edSettings = ed->analyzer.settings();
@@ -177,13 +197,10 @@ int AudioEngine::processAudio() {
         if (edHop < 1) edHop = 1;
         ed->audioBuf.resize(edHop * edCh);
 
-        int edSpectra = 0;
-        while (edSpectra < kMaxSpectraPerFrame) {
+        for (;;) {
             size_t framesRead = ed->source->read(ed->audioBuf.data(), edHop);
             if (framesRead == 0) break;
             ed->analyzer.pushSamples(ed->audioBuf.data(), framesRead);
-            if (ed->analyzer.hasNewSpectrum())
-                ++edSpectra;
         }
     }
 
@@ -224,6 +241,18 @@ const std::vector<float>& AudioEngine::getSpectrum(int globalCh) const {
         globalCh -= en;
     }
     return analyzer_.channelSpectrum(0);
+}
+
+const std::deque<std::vector<float>>& AudioEngine::getWaterfallHistory(int globalCh) const {
+    int n = analyzer_.numSpectra();
+    if (globalCh < n) return analyzer_.waterfallHistory(globalCh);
+    globalCh -= n;
+    for (auto& ed : extraDevices_) {
+        int en = ed->analyzer.numSpectra();
+        if (globalCh < en) return ed->analyzer.waterfallHistory(globalCh);
+        globalCh -= en;
+    }
+    return analyzer_.waterfallHistory(0);
 }
 
 const std::vector<std::complex<float>>& AudioEngine::getComplex(int globalCh) const {

@@ -312,28 +312,49 @@ void Application::processAudio() {
         const auto& mathChannels = audio_.mathChannels();
         const auto& mathSpectra  = audio_.mathSpectra();
 
+        // Push ALL new spectra to the waterfall so that the scroll rate
+        // is determined by the audio sample rate, not the display refresh.
         if (ui_.waterfallMultiCh && nSpec > 1) {
-            std::vector<std::vector<float>> wfSpectra;
-            std::vector<WaterfallChannelInfo> wfInfo;
+            // For multi-channel: replay the last spectraThisFrame entries
+            // from channel 0's history to get per-step data.  Other
+            // channels have the same count of new entries.
+            const auto& hist0 = audio_.getWaterfallHistory(0);
+            int histSz = static_cast<int>(hist0.size());
+            int start = std::max(0, histSz - spectraThisFrame);
 
-            for (int ch = 0; ch < nSpec; ++ch) {
-                const auto& c = ui_.channelColors[ch % kMaxChannels];
-                wfSpectra.push_back(audio_.getSpectrum(ch));
-                wfInfo.push_back({c.x, c.y, c.z,
-                                  ui_.channelEnabled[ch % kMaxChannels]});
-            }
-            for (size_t mi = 0; mi < mathChannels.size(); ++mi) {
-                if (mathChannels[mi].enabled && mathChannels[mi].waterfall &&
-                    mi < mathSpectra.size()) {
-                    const auto& c = mathChannels[mi].color;
-                    wfSpectra.push_back(mathSpectra[mi]);
-                    wfInfo.push_back({c[0], c[1], c[2], true});
+            for (int si = start; si < histSz; ++si) {
+                std::vector<std::vector<float>> wfSpectra;
+                std::vector<WaterfallChannelInfo> wfInfo;
+
+                for (int ch = 0; ch < nSpec; ++ch) {
+                    const auto& c = ui_.channelColors[ch % kMaxChannels];
+                    const auto& hist = audio_.getWaterfallHistory(ch);
+                    int idx = std::max(0, static_cast<int>(hist.size()) - (histSz - si));
+                    wfSpectra.push_back(hist[idx]);
+                    wfInfo.push_back({c.x, c.y, c.z,
+                                      ui_.channelEnabled[ch % kMaxChannels]});
                 }
+                // Math channels only available for the latest spectrum;
+                // include them only on the last iteration.
+                if (si == histSz - 1) {
+                    for (size_t mi = 0; mi < mathChannels.size(); ++mi) {
+                        if (mathChannels[mi].enabled && mathChannels[mi].waterfall &&
+                            mi < mathSpectra.size()) {
+                            const auto& c = mathChannels[mi].color;
+                            wfSpectra.push_back(mathSpectra[mi]);
+                            wfInfo.push_back({c[0], c[1], c[2], true});
+                        }
+                    }
+                }
+                waterfall_.pushLineMulti(wfSpectra, wfInfo, ui_.minDB, ui_.maxDB);
             }
-            waterfall_.pushLineMulti(wfSpectra, wfInfo, ui_.minDB, ui_.maxDB);
         } else {
             int wfCh = std::clamp(ui_.waterfallChannel, 0, nSpec - 1);
-            waterfall_.pushLine(audio_.getSpectrum(wfCh), ui_.minDB, ui_.maxDB);
+            const auto& hist = audio_.getWaterfallHistory(wfCh);
+            int histSz = static_cast<int>(hist.size());
+            int start = std::max(0, histSz - spectraThisFrame);
+            for (int si = start; si < histSz; ++si)
+                waterfall_.pushLine(hist[si], ui_.minDB, ui_.maxDB);
         }
         int curCh = std::clamp(ui_.waterfallChannel, 0, nSpec - 1);
         cursors_.update(audio_.getSpectrum(curCh),
