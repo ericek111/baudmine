@@ -41,6 +41,8 @@ public:
 
     float spectrumFrac  = 0.35f;
     bool  draggingSplit  = false;
+    bool  showRuler      = false;
+    float rulerWidth_    = 0.0f;   // current ruler width in pixels (0 when hidden)
 
 private:
     void handleSpectrumInput(AudioEngine& audio, UIState& ui,

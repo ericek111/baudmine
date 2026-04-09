@@ -5,10 +5,26 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
 namespace baudmine {
 
 namespace {
+
+// Ruler styling constants (shared by time and dB rulers).
+constexpr ImU32 kRulerBg       = IM_COL32(20, 20, 30, 220);
+constexpr ImU32 kRulerTickCol  = IM_COL32(200, 200, 220, 230);
+constexpr ImU32 kRulerLabelCol = IM_COL32(220, 220, 240, 240);
+constexpr ImU32 kRulerUnitCol  = IM_COL32(180, 180, 200, 220);
+
+// Pick the smallest "nice" value from a sorted table that is >= target.
+// Returns the last element if none qualifies.
+template<typename T, size_t N>
+T pickNiceStep(const T (&table)[N], T target) {
+    for (const T& v : table)
+        if (v >= target) return v;
+    return table[N - 1];
+}
 
 // Zoom the view range centered on a screen-fraction cursor position.
 void zoomView(float& viewLo, float& viewHi, float cursorScreenFrac, float wheelDir) {
@@ -44,11 +60,11 @@ void DisplayPanel::renderSpectrum(AudioEngine& audio, UIState& ui,
                                    Measurements& measurements) {
     const auto& settings = audio.settings();
 
-    float availW = ImGui::GetContentRegionAvail().x;
+    float availW = ImGui::GetContentRegionAvail().x - rulerWidth_;
     float specH = ImGui::GetContentRegionAvail().y;
 
     ImVec2 pos = ImGui::GetCursorScreenPos();
-    specPosX = pos.x;
+    specPosX = pos.x + rulerWidth_;
     specPosY = pos.y;
     specSizeX = availW;
     specSizeY = specH;
@@ -83,6 +99,7 @@ void DisplayPanel::renderSpectrum(AudioEngine& audio, UIState& ui,
     }
 
     specDisplay.updatePeakHold(allSpectraScratch_);
+    specDisplay.dbLabelOffsetX = rulerWidth_;
     specDisplay.draw(allSpectraScratch_, stylesScratch_, ui.minDB, ui.maxDB,
                      settings.sampleRate, settings.isIQ, ui.freqScale,
                      specPosX, specPosY, specSizeX, specSizeY,
@@ -96,10 +113,45 @@ void DisplayPanel::renderSpectrum(AudioEngine& audio, UIState& ui,
                       settings.sampleRate, settings.isIQ, ui.freqScale, ui.minDB, ui.maxDB,
                       ui.viewLo, ui.viewHi);
 
+    // ── dB ruler ──
+    if (showRuler && rulerWidth_ > 0.0f) {
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        float rulerX = pos.x;
+
+        dl->AddRectFilled({rulerX, specPosY},
+                          {rulerX + rulerWidth_, specPosY + specH}, kRulerBg);
+        dl->AddLine({rulerX + rulerWidth_ - 1, specPosY},
+                    {rulerX + rulerWidth_ - 1, specPosY + specH},
+                    kRulerTickCol, 1.0f);
+
+        constexpr float kTargetDbSpacing = 30.0f;
+        float dbRange = ui.maxDB - ui.minDB;
+        static const float kNiceDbSteps[] = {1.0f, 2.0f, 5.0f, 10.0f, 20.0f, 50.0f, 100.0f};
+        float dbStep = pickNiceStep(kNiceDbSteps, dbRange * (kTargetDbSpacing / specH));
+
+        float charH = ImGui::CalcTextSize("0").y;
+        float bottomCutoff = specPosY + specH - charH * 2 - 4.0f;
+        for (float db = std::ceil(ui.minDB / dbStep) * dbStep; db <= ui.maxDB + 0.01f; db += dbStep) {
+            float y = specPosY + specH * (1.0f - (db - ui.minDB) / dbRange);
+            if (y > bottomCutoff) continue;
+
+            dl->AddLine({rulerX, y},
+                        {rulerX + rulerWidth_ - 1, y}, kRulerTickCol, 2.0f);
+
+            char numBuf[16];
+            std::snprintf(numBuf, sizeof(numBuf), "%.0f", db);
+            dl->AddText({rulerX - 3.0f, y + 2.0f}, kRulerLabelCol, numBuf);
+        }
+
+        ImVec2 unitSz = ImGui::CalcTextSize("dB");
+        dl->AddText({rulerX + 2.0f, specPosY + specH - unitSz.y - 2.0f},
+                    kRulerUnitCol, "dB");
+    }
+
     handleSpectrumInput(audio, ui, specDisplay, cursors,
                         specPosX, specPosY, specSizeX, specSizeY);
 
-    ImGui::Dummy({availW, specH});
+    ImGui::Dummy({availW + rulerWidth_, specH});
 }
 
 void DisplayPanel::renderWaterfall(AudioEngine& audio, UIState& ui,
@@ -108,10 +160,15 @@ void DisplayPanel::renderWaterfall(AudioEngine& audio, UIState& ui,
                                     ColorMap& colorMap) {
     const auto& settings = audio.settings();
 
-    float availW = ImGui::GetContentRegionAvail().x;
+    float fullW = ImGui::GetContentRegionAvail().x;
     constexpr float kSplitterH = 6.0f;
     float parentH = ImGui::GetContentRegionAvail().y;
     float availH = (parentH - kSplitterH) * (1.0f - spectrumFrac);
+
+    // Compute ruler width (used by both waterfall and spectrum rendering).
+    float labelW = ImGui::CalcTextSize("-000").x;
+    rulerWidth_ = showRuler ? labelW : 0.0f;
+    float availW = fullW - rulerWidth_;
 
     int neededH = std::max(1024, static_cast<int>(availH) + 1);
     int binCount = std::max(1, audio.spectrumSize());
@@ -121,7 +178,8 @@ void DisplayPanel::renderWaterfall(AudioEngine& audio, UIState& ui,
     }
 
     if (waterfall.textureID()) {
-        ImVec2 pos = ImGui::GetCursorScreenPos();
+        ImVec2 basePos = ImGui::GetCursorScreenPos();
+        ImVec2 pos = {basePos.x + rulerWidth_, basePos.y};
         ImDrawList* dl = ImGui::GetWindowDrawList();
         auto texID = static_cast<ImTextureID>(waterfall.textureID());
 
@@ -213,9 +271,85 @@ void DisplayPanel::renderWaterfall(AudioEngine& audio, UIState& ui,
 
         wfPosX = pos.x; wfPosY = pos.y; wfSizeX = availW; wfSizeY = availH;
 
+        int hopSamples = std::max(1, static_cast<int>(settings.fftSize * (1.0f - settings.overlap)));
+        double secondsPerLine = static_cast<double>(hopSamples) / settings.sampleRate;
+
         measurements.drawWaterfall(specDisplay, wfPosX, wfPosY, wfSizeX, wfSizeY,
                                    settings.sampleRate, settings.isIQ, ui.freqScale,
                                    ui.viewLo, ui.viewHi, screenRows, audio.spectrumSize());
+
+        // ── Timescale ruler ──
+        if (showRuler && rulerWidth_ > 0.0f) {
+            double totalTime = screenRows * secondsPerLine;
+
+            float rulerX = basePos.x;
+            float rulerY = basePos.y;
+
+            dl->AddRectFilled({rulerX, rulerY},
+                              {rulerX + rulerWidth_, rulerY + availH}, kRulerBg);
+            dl->AddLine({rulerX + rulerWidth_ - 1, rulerY},
+                        {rulerX + rulerWidth_ - 1, rulerY + availH},
+                        kRulerTickCol, 1.0f);
+
+            // Pick a nice major tick interval targeting ~80px spacing.
+            constexpr float kTargetTickSpacing = 80.0f;
+            static const double kNiceIntervals[] = {
+                0.001, 0.002, 0.005, 0.01, 0.02, 0.05,
+                0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0, 60.0, 120.0, 300.0
+            };
+            double majorInterval = pickNiceStep(kNiceIntervals,
+                                                totalTime * (kTargetTickSpacing / availH));
+            double minorInterval = majorInterval / 4.0;
+            bool useMs = (majorInterval < 1.0);
+            float charH = ImGui::CalcTextSize("0").y;
+
+            // Minor ticks
+            float minorTickLen = rulerWidth_ / 3.0f;
+            for (int idx = 1;; ++idx) {
+                double t = minorInterval * idx;
+                if (t >= totalTime) break;
+                if (idx % 4 == 0) continue;
+
+                float y = rulerY + availH - static_cast<float>(t / totalTime) * availH;
+                if (y < rulerY) break;
+
+                float tickLen = (idx % 2 == 0) ? minorTickLen * 1.5f : minorTickLen;
+                dl->AddLine({rulerX + rulerWidth_ - 1 - tickLen, y},
+                            {rulerX + rulerWidth_ - 1, y}, kRulerTickCol, 1.5f);
+            }
+
+            // Major ticks with vertically stacked digit labels
+            for (int idx = 1;; ++idx) {
+                double t = majorInterval * idx;
+                if (t >= totalTime) break;
+
+                float y = rulerY + availH - static_cast<float>(t / totalTime) * availH;
+                if (y < rulerY) break;
+
+                dl->AddLine({rulerX, y},
+                            {rulerX + rulerWidth_ - 1, y}, kRulerTickCol, 2.0f);
+
+                char numBuf[16];
+                int ival = static_cast<int>((useMs ? t * 1000.0 : t) + 0.5);
+                std::snprintf(numBuf, sizeof(numBuf), "%d", ival);
+
+                int nDigits = static_cast<int>(std::strlen(numBuf));
+                float digitX = rulerX + 2.0f;
+                float digitY = y + 3.0f;
+                for (int d = 0; d < nDigits; ++d) {
+                    if (digitY + charH > rulerY + availH - charH) break;
+                    char ch[2] = {numBuf[d], '\0'};
+                    dl->AddText({digitX, digitY}, kRulerLabelCol, ch);
+                    digitY += charH;
+                }
+            }
+
+            // Unit label at the very bottom
+            const char* unit = useMs ? "ms" : "s";
+            ImVec2 unitSz = ImGui::CalcTextSize(unit);
+            dl->AddText({rulerX + 2.0f, rulerY + availH - unitSz.y - 2.0f},
+                        kRulerUnitCol, unit);
+        }
 
         // ── Mouse interaction: zoom, pan & hover on waterfall ──
         ImGuiIO& io = ImGui::GetIO();
@@ -237,9 +371,6 @@ void DisplayPanel::renderWaterfall(AudioEngine& audio, UIState& ui,
             bin = std::clamp(bin, 0, bins - 1);
 
             float yFrac = 1.0f - (my - pos.y) / availH;
-            int hopSamples = static_cast<int>(settings.fftSize * (1.0f - settings.overlap));
-            if (hopSamples < 1) hopSamples = 1;
-            double secondsPerLine = static_cast<double>(hopSamples) / settings.sampleRate;
             hoverWfTimeOff = static_cast<float>(yFrac * screenRows * secondsPerLine);
 
             int curCh = std::clamp(ui.waterfallChannel, 0, audio.totalNumSpectra() - 1);
@@ -247,9 +378,7 @@ void DisplayPanel::renderWaterfall(AudioEngine& audio, UIState& ui,
             if (!spec.empty()) {
                 cursors.hover = {true, freq, spec[bin], bin};
             }
-        }
 
-        if (inWaterfall) {
             if (io.MouseWheel != 0)
                 zoomView(ui.viewLo, ui.viewHi, (mx - pos.x) / availW, io.MouseWheel);
 
@@ -263,7 +392,7 @@ void DisplayPanel::renderWaterfall(AudioEngine& audio, UIState& ui,
         }
     }
 
-    ImGui::Dummy({availW, availH});
+    ImGui::Dummy({fullW, availH});
 }
 
 void DisplayPanel::renderHoverOverlay(const AudioEngine& audio, const UIState& ui,

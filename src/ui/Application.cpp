@@ -512,6 +512,9 @@ void Application::render() {
             ImGui::MenuItem("Additive Blend", nullptr, &specDisplay_.additiveBlend);
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Mix multi-channel spectrum colors additively");
+            ImGui::MenuItem("Rulers", nullptr, &displayPanel_.showRuler);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Show timescale ruler on waterfall");
             ImGui::Separator();
             if (ImGui::MenuItem("VSync", nullptr, &vsync_)) {
                 SDL_GL_SetSwapInterval(vsync_ ? 1 : 0);
@@ -716,6 +719,7 @@ void Application::loadConfig() {
     specDisplay_.peakHoldDecay    = config_.getFloat("peak_hold_decay", specDisplay_.peakHoldDecay);
     specDisplay_.additiveBlend    = config_.getBool("additive_blend", specDisplay_.additiveBlend);
     cursors_.snapToPeaks          = config_.getBool("snap_to_peaks", cursors_.snapToPeaks);
+    displayPanel_.showRuler       = config_.getBool("show_ruler", displayPanel_.showRuler);
     measurements_.traceMinFreq    = config_.getFloat("trace_min_freq", measurements_.traceMinFreq);
     measurements_.traceMaxFreq    = config_.getFloat("trace_max_freq", measurements_.traceMaxFreq);
     ui_.specMinPixPerBin          = config_.getInt("spec_min_pix_per_bin", ui_.specMinPixPerBin);
@@ -781,6 +785,7 @@ void Application::saveConfig() const {
     cfg.setFloat("peak_hold_decay", specDisplay_.peakHoldDecay);
     cfg.setBool("additive_blend", specDisplay_.additiveBlend);
     cfg.setBool("snap_to_peaks", cursors_.snapToPeaks);
+    cfg.setBool("show_ruler", displayPanel_.showRuler);
     cfg.setFloat("trace_min_freq", measurements_.traceMinFreq);
     cfg.setFloat("trace_max_freq", measurements_.traceMaxFreq);
     cfg.setInt("spec_min_pix_per_bin", ui_.specMinPixPerBin);

@@ -50,6 +50,7 @@ public:
     bool  additiveBlend  = true;   // additive color mixing for multi-channel
     bool  peakHoldEnable = false;
     float peakHoldDecay  = 20.0f;  // dB/second decay rate
+    float dbLabelOffsetX = 0.0f;   // shift dB labels left (into ruler area)
 
 private:
     // One peak-hold trace per channel.

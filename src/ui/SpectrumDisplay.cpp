@@ -149,7 +149,7 @@ void SpectrumDisplay::draw(const std::vector<std::vector<float>>& spectra,
             dl->AddLine({posX, y}, {posX + sizeX, y}, gridCol);
             char label[16];
             std::snprintf(label, sizeof(label), "%.0f", db);
-            dl->AddText({posX + 2, y - ImGui::GetTextLineHeight()}, textCol, label);
+            dl->AddText({posX + 2 - dbLabelOffsetX, y - ImGui::GetTextLineHeight()}, textCol, label);
         }
 
         // ── Vertical (frequency) grid — adapt count to available width ──
