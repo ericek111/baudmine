@@ -236,12 +236,14 @@ bool Application::init(int argc, char** argv) {
 }
 
 void Application::shutdown() {
+    if (!window_) return;  // already shut down
     audio_.closeAll();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL2_Shutdown();
     ImGui::DestroyContext();
     if (glContext_) { SDL_GL_DeleteContext(glContext_); glContext_ = nullptr; }
-    if (window_)    { SDL_DestroyWindow(window_); window_ = nullptr; }
+    SDL_DestroyWindow(window_);
+    window_ = nullptr;
     SDL_Quit();
 }
 
