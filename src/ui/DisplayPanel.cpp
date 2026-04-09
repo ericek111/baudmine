@@ -86,7 +86,7 @@ void DisplayPanel::renderSpectrum(AudioEngine& audio, UIState& ui,
     specDisplay.draw(allSpectraScratch_, stylesScratch_, ui.minDB, ui.maxDB,
                      settings.sampleRate, settings.isIQ, ui.freqScale,
                      specPosX, specPosY, specSizeX, specSizeY,
-                     ui.viewLo, ui.viewHi);
+                     ui.viewLo, ui.viewHi, ui.specMinPixPerBin);
 
     cursors.draw(specDisplay, specPosX, specPosY, specSizeX, specSizeY,
                  settings.sampleRate, settings.isIQ, ui.freqScale, ui.minDB, ui.maxDB,

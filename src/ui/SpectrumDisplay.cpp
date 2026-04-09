@@ -60,9 +60,11 @@ static void buildPolyline(const std::vector<float>& spectrumDB,
                            bool isIQ, FreqScale freqScale,
                            float posX, float posY, float sizeX, float sizeY,
                            float viewLo, float viewHi,
-                           std::vector<ImVec2>& outPoints) {
+                           std::vector<ImVec2>& outPoints,
+                           int minPixPerBin = 1) {
     int bins = static_cast<int>(spectrumDB.size());
-    int displayPts = std::min(bins, static_cast<int>(sizeX));
+    int maxPts = std::max(1, static_cast<int>(sizeX) / std::max(1, minPixPerBin));
+    int displayPts = std::min(bins, maxPts);
     if (displayPts < 2) displayPts = 2;
 
     outPoints.resize(displayPts);
@@ -108,7 +110,8 @@ void SpectrumDisplay::draw(const std::vector<std::vector<float>>& spectra,
                            FreqScale freqScale,
                            float posX, float posY,
                            float sizeX, float sizeY,
-                           float viewLo, float viewHi) const {
+                           float viewLo, float viewHi,
+                           int minPixPerBin) const {
     if (spectra.empty() || spectra[0].empty() || sizeX <= 0 || sizeY <= 0) return;
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -178,7 +181,7 @@ void SpectrumDisplay::draw(const std::vector<std::vector<float>>& spectra,
         if (spectra[ch].empty()) continue;
         buildPolyline(spectra[ch], minDB, maxDB,
                       isIQ, freqScale, posX, posY, sizeX, sizeY,
-                      viewLo, viewHi, allPoints[ch]);
+                      viewLo, viewHi, allPoints[ch], minPixPerBin);
     }
 
     // Draw spectra: all fills first, then all lines on top.
@@ -237,7 +240,7 @@ void SpectrumDisplay::draw(const std::vector<std::vector<float>>& spectra,
             ImU32 col = (st.lineColor & 0x00FFFFFF) | 0x90000000;
             buildPolyline(peakHold_[ch], minDB, maxDB,
                           isIQ, freqScale, posX, posY, sizeX, sizeY,
-                          viewLo, viewHi, phPoints);
+                          viewLo, viewHi, phPoints, minPixPerBin);
             if (phPoints.size() >= 2)
                 dl->AddPolyline(phPoints.data(), static_cast<int>(phPoints.size()),
                                 col, ImDrawFlags_None, 1.0f);

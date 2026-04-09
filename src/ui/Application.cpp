@@ -702,6 +702,7 @@ void Application::loadConfig() {
     cursors_.snapToPeaks          = config_.getBool("snap_to_peaks", cursors_.snapToPeaks);
     measurements_.traceMinFreq    = config_.getFloat("trace_min_freq", measurements_.traceMinFreq);
     measurements_.traceMaxFreq    = config_.getFloat("trace_max_freq", measurements_.traceMaxFreq);
+    ui_.specMinPixPerBin          = config_.getInt("spec_min_pix_per_bin", ui_.specMinPixPerBin);
 
     // Clamp
     controlPanel_.fftSizeIdx   = std::clamp(controlPanel_.fftSizeIdx, 0, ControlPanel::kNumFFTSizes - 1);
@@ -766,6 +767,7 @@ void Application::saveConfig() const {
     cfg.setBool("snap_to_peaks", cursors_.snapToPeaks);
     cfg.setFloat("trace_min_freq", measurements_.traceMinFreq);
     cfg.setFloat("trace_max_freq", measurements_.traceMaxFreq);
+    cfg.setInt("spec_min_pix_per_bin", ui_.specMinPixPerBin);
 
     int devIdx = audio_.deviceIdx();
     if (devIdx >= 0 && devIdx < static_cast<int>(devices.size()))

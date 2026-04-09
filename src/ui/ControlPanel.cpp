@@ -178,6 +178,15 @@ void ControlPanel::render(AudioEngine& audio, UIState& ui,
             }
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Reset to 2x zoom");
         }
+
+        {
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("Decim:");
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+            ImGui::SliderInt("##decimation", &ui.specMinPixPerBin, 1, 8, "%d px/bin");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Spectrum frequency decimation (peak-detect)");
+        }
     }
 
     // ── Channels ──

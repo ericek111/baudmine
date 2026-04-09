@@ -22,7 +22,8 @@ public:
               double sampleRate, bool isIQ,
               FreqScale freqScale,
               float posX, float posY, float sizeX, float sizeY,
-              float viewLo = 0.0f, float viewHi = 1.0f) const;
+              float viewLo = 0.0f, float viewHi = 1.0f,
+              int minPixPerBin = 1) const;
 
     // Convenience: single-channel draw (backward compat).
     void draw(const std::vector<float>& spectrumDB,

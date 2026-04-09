@@ -17,6 +17,7 @@ struct UIState {
 
     int  waterfallChannel = 0;
     bool waterfallMultiCh = true;
+    int  specMinPixPerBin = 1;   // min screen pixels per spectrum bin (1 = no decimation)
     std::array<bool, kMaxChannels> channelEnabled = {true,true,true,true,true,true,true,true};
     // Complementary pairs: colors at indices 0+1, 2+3, 4+5, 6+7 sum to white.
     std::array<ImVec4, kMaxChannels> channelColors = {{
