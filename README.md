@@ -53,7 +53,7 @@ You can find the Web version here, delivered in 870 kB: https://ericek111.github
 # Install dependencies (Debian/Ubuntu)
 sudo apt install build-essential cmake pkg-config libsdl2-dev libfftw3-dev libsndfile1-dev libgl-dev
 
-cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DNATIVE_BUILD=ON
 cmake --build build -j$(nproc)
 ```
 
@@ -62,7 +62,7 @@ cmake --build build -j$(nproc)
 ```powershell
 vcpkg install sdl2 fftw3 "libsndfile[core]" --triplet x64-windows
 
-cmake -B build -DCMAKE_BUILD_TYPE=Release `
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DNATIVE_BUILD=ON `
     -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
     -DVCPKG_TARGET_TRIPLET=x64-windows
 cmake --build build --config Release

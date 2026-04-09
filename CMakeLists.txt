@@ -180,11 +180,17 @@ if(EMSCRIPTEN)
 else()
     # ── Native Build ─────────────────────────────────────────────────────────
 
+    option(NATIVE_BUILD "Optimize for the host CPU (-march=native)" OFF)
+
     if(MSVC)
-        set(CMAKE_CXX_FLAGS_RELEASE "/O2 /DNDEBUG")
+        set(CMAKE_CXX_FLAGS_RELEASE "/O2 /DNDEBUG /arch:AVX2")
         set(CMAKE_CXX_FLAGS_DEBUG "/Zi /Od")
     else()
-        set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -DNDEBUG")
+        if(NATIVE_BUILD)
+            set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -DNDEBUG")
+        else()
+            set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=x86-64-v3 -DNDEBUG")
+        endif()
         set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -fsanitize=address,undefined")
     endif()
 
